@@ -1,0 +1,119 @@
+{
+  "design_summary": "Build a single FastAPI package under app/ with all application logic in app/main.py. The app factory will create the SQLite schema at startup, and every request will open its own sqlite3 connection with foreign keys and busy timeout enabled, then close it on exit. URL creation will validate input strictly, generate short codes with a pluggable generator and bounded collision retries, and persist links with timestamps and click counts. Redirect handling will use explicit GET and HEAD routes so HEAD never increments counters, while GET increments atomically in a transaction before redirecting. Readiness will probe the database with a fresh connection, and all generated short URLs will be based on the configured base_url rather than request headers.",
+  "impact_map": [
+    {
+      "path": "app/__init__.py",
+      "symbol": "package initializer",
+      "change": "create",
+      "reason": "Establish the app package required by the contract and trusted tests."
+    },
+    {
+      "path": "app/main.py",
+      "symbol": "create_app, app, connection helpers, validators, route handlers",
+      "change": "create",
+      "reason": "Implement the FastAPI factory, module-level app, SQLite schema bootstrap, per-request connections, URL validation, code allocation, redirects, stats, health, and readiness endpoints."
+    },
+    {
+      "path": "tests/test_main.py",
+      "symbol": "contract tests for factory and endpoints",
+      "change": "create",
+      "reason": "Verify the authoritative behavior for persistence, validation, redirects, collision handling, and readiness semantics."
+    }
+  ],
+  "migration": {
+    "required": true,
+    "description": "Initial SQLite schema bootstrap for the new URL shortener: create the `links` table with `code`, `target_url`, `created_at`, and `click_count`. No destructive migration is needed because this is a greenfield application; the schema creation is additive only.",
+    "additive_only": true
+  },
+  "tasks": [
+    {
+      "task_id": "t1",
+      "title": "Implement the FastAPI URL shortener application",
+      "dependencies": [],
+      "allowed_paths": [
+        "app/**"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5",
+        "AC-6",
+        "AC-7",
+        "AC-8",
+        "AC-9",
+        "AC-10",
+        "AC-11",
+        "AC-12",
+        "AC-13",
+        "AC-14",
+        "AC-15"
+      ],
+      "risk_level": "high",
+      "instructions": "Create app/__init__.py and app/main.py. In app/main.py, expose create_app(db_path, base_url=\"http://localhost:8000\", now=None, code_generator=None) and a module-level app initialized from SHORTENER_DB_PATH and BASE_URL environment variables with /tmp/shortener.db as the default path. Implement a helper that opens a fresh sqlite3 connection per request, sets PRAGMA foreign_keys=ON and PRAGMA busy_timeout=5000, and closes it reliably. Create the schema on app creation and also ensure it lazily on demand if missing. Implement URL validation exactly per contract: missing or non-string body value -> 422; length > 2048 -> 422; only absolute http/https URLs; reject userinfo; reject empty host; reject any whitespace/control characters in host; reject any control characters anywhere in the string. Use urllib.parse for parsing and parameterized SQL only. Implement POST /api/links to allocate an 8-character code using a default generator based on secrets.choice over ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789, retrying at most 5 times on collisions and returning 503 {\"detail\":\"could not allocate code\"} after repeated conflicts. Store created_at as an ISO-8601 UTC string from now() and return code, short_url based on base_url, url, and created_at. Implement GET /r/{code} to atomically increment click_count inside the same transaction before redirecting, return 404 for unknown codes, and return 503 if the write fails without issuing a redirect. Implement a separate HEAD /r/{code} that returns 302 or 404 and never increments click_count. Ensure other methods on /r/{code} are not added so FastAPI/Starlette returns 405. Implement GET /api/links/{code}/stats, GET /healthz, and GET /readyz using a fresh connection for readiness that runs SELECT 1. Make sure the implementation never fetches target URLs and never stores IPs or user agents."
+    },
+    {
+      "task_id": "t2",
+      "title": "Add contract tests for the URL shortener",
+      "dependencies": [
+        "t1"
+      ],
+      "allowed_paths": [
+        "tests/**"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5",
+        "AC-6",
+        "AC-7",
+        "AC-8",
+        "AC-9",
+        "AC-10",
+        "AC-11",
+        "AC-12",
+        "AC-13",
+        "AC-14",
+        "AC-15"
+      ],
+      "risk_level": "medium",
+      "instructions": "Create tests that exercise the public contract through app.main.create_app and the module-level app. Cover factory/environment initialization, schema creation, per-request connection behavior indirectly through persistence and readiness, valid link creation, invalid URL cases, base_url-derived short_url, collision retry exhaustion, redirect and HEAD semantics, click_count increments, stats endpoint, healthz, readyz, and persistence across app instances using the same SQLite file. Use deterministic now() and code_generator() fixtures where needed so tests are stable. Include checks that GET /r/{code} increments exactly once, HEAD does not increment, unknown codes return 404, write failures on redirect return 503 if you can simulate them with a controlled database file or monkeypatched connection behavior, and that the application does not depend on the Host header when building short_url."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Keep all application code in app/main.py for this stage",
+      "rationale": "The contract requires only a single FastAPI package and does not benefit from additional modules in a greenfield implementation."
+    },
+    {
+      "decision": "Use explicit GET and HEAD routes for /r/{code}",
+      "rationale": "Starlette's automatic HEAD handling for GET could otherwise increment click counts; explicit routes preserve the no-increment requirement."
+    },
+    {
+      "decision": "Use fresh sqlite3 connections per request with explicit transaction boundaries",
+      "rationale": "This satisfies the no-global-connection requirement, supports lazy schema creation, and keeps redirect updates atomic."
+    },
+    {
+      "decision": "Validate URLs with parse-and-check logic rather than network calls",
+      "rationale": "The service must never fetch destination URLs, so validation must be purely syntactic and deterministic."
+    },
+    {
+      "decision": "Base short_url only on the configured base_url",
+      "rationale": "The contract explicitly forbids using the request Host header when generating returned short URLs."
+    }
+  ],
+  "required_approvals": [
+    "plan",
+    "migration",
+    "release"
+  ],
+  "risks": [
+    "SQLite transaction behavior and file locking can be subtle under concurrent access, so the per-request connection and busy timeout need careful implementation.",
+    "URL validation has edge cases around IPv6, control characters, and userinfo; tests should pin the intended interpretation.",
+    "Automatic HEAD handling must be overridden deliberately to avoid unintended click_count increments.",
+    "Collision retry logic must cap attempts at five and remain deterministic under tests that inject a fixed code generator."
+  ]
+}

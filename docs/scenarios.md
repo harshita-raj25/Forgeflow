@@ -6,7 +6,7 @@ repository's `runs/` directory (fixture mode unless noted) — exported bundles 
 
 ## Scenario A — greenfield
 
-Run: `run_rf7vbh728j5e` (fixture) — `runs/run_rf7vbh728j5e/export/`
+Run: `run_k2epxpc9spq7` (fixture) — `runs/run_k2epxpc9spq7/export/`
 
 ```
 forgeflow create A_greenfield
@@ -32,28 +32,28 @@ create → 302 redirect → `click_count` incremented to 1 (see `docs/testing-re
 
 ## Scenario B — brownfield custom aliases
 
-Normal run: `run_f8nq7tcg7av6` (fixture) — baseline is scenario A's own release
-(`runs/run_rf7vbh728j5e/export/release/candidate`), auto-resolved by
+Normal run: `run_bbjd8vgzdxzw` (fixture) — baseline is scenario A's own release
+(`runs/run_k2epxpc9spq7/export/release/candidate`), auto-resolved by
 `Coordinator.latest_release_dir("A_greenfield")`.
 
-Evidence: `runs/run_f8nq7tcg7av6/export/decisions.json` impact map cites real paths/symbols from the
+Evidence: `runs/run_bbjd8vgzdxzw/export/decisions.json` impact map cites real paths/symbols from the
 baseline (`app/main.py::create_link`, `create_app`) via the `baseline_analysis` node's `ast`-based
 symbol inventory (`runs/f.../artifacts/baseline-inventory.json`); `release-manifest.json`'s
 `baseline_hash` equals scenario A's `candidate_hash`, proving lineage; `validation/` shows 34 passed
 (regression + new alias tests) for stage B.
 
 **Controlled recovery demonstration** (separate, clearly labeled run):
-`run_n889s4wa42xg` (fixture, `--inject-fault`). `events.jsonl` shows, in order: a `fault_injected` event
+`run_b2t2ghswsrcf` (fixture, `--inject-fault`). `events.jsonl` shows, in order: a `fault_injected` event
 (`label: FORGEFLOW_INJECTED_FAULT`, one-time, on `app/main.py`), a real `tool_result` for `test` with
 `exit_code: 1` from inside the Docker worker, a `node_finished` (`validate`, `FAILED`,
 `repairable: true`), a `repair_started` event (`cycle: 1`, `limit: 2`), then a clean re-implementation
 and a `join_passed` event, ending `SUCCEEDED` with `repair_cycles: 1`. The fault is explicitly labeled in
 every event and in `run-summary.md` (`Fault injection: YES`) — never presented as a naturally discovered
-defect. A normal (non-injected) run (`run_f8nq7tcg7av6`) is kept as the product evidence.
+defect. A normal (non-injected) run (`run_bbjd8vgzdxzw`) is kept as the product evidence.
 
 ## Scenario C — ambiguous requirement + upstream replanning
 
-Run: `run_i8pv2tnirpma` (fixture) — baseline is scenario B's release.
+Run: `run_jyi3hbniidwd` (fixture) — baseline is scenario B's release.
 
 1. **Clarification pause.** `forgeflow resume` on the fresh run returns `WAITING_FOR_INPUT` before any
    plan or code exists (`clarifications.json`, 4 blocking questions: what makes a link old, what happens

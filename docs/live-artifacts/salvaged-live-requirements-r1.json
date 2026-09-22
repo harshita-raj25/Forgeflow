@@ -1,0 +1,83 @@
+{
+  "normalized_requirement": "Implement a FastAPI-based local URL shortener in package `app/` with `app/main.py` exposing `create_app(db_path, base_url=\"http://localhost:8000\", now=None, code_generator=None)` and a module-level `app` initialized from environment variables. The service must persist links in SQLite, create the schema automatically, provide URL creation, redirect, stats, health, and readiness endpoints, validate submitted URLs, allocate unique short codes with collision handling, and use the configured `base_url` when generating short links.",
+  "assumptions": [
+    "The authoritative target contract fully defines the intended behavior for this scenario.",
+    "The implementation will use only the Python standard library plus FastAPI/ASGI dependencies already available in the environment.",
+    "The default database path will be writable because `/tmp/shortener.db` is used when `SHORTENER_DB_PATH` is unset.",
+    "Tests will interact with the application through the documented factory and module-level app, not through any additional APIs."
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "statement": "`app/` exists with `app/__init__.py` and `app/main.py`, and `app/main.py` exports `create_app(db_path, base_url=\"http://localhost:8000\", now=None, code_generator=None) -> fastapi.FastAPI` plus a module-level `app` created from `SHORTENER_DB_PATH` and `BASE_URL` environment variables."
+    },
+    {
+      "id": "AC-2",
+      "statement": "The application creates the SQLite schema on app creation and again lazily if missing, using a table named `links(code TEXT PRIMARY KEY, target_url TEXT NOT NULL, created_at TEXT NOT NULL, click_count INTEGER NOT NULL DEFAULT 0)`."
+    },
+    {
+      "id": "AC-3",
+      "statement": "Each request uses a fresh SQLite connection that enables foreign keys, sets `PRAGMA busy_timeout=5000`, and is closed after use; no database connection is kept open between requests."
+    },
+    {
+      "id": "AC-4",
+      "statement": "`POST /api/links` accepts JSON `{\"url\":\"...\"}` and returns `201` with JSON containing `code`, `short_url`, `url`, and `created_at` for valid inputs."
+    },
+    {
+      "id": "AC-5",
+      "statement": "`POST /api/links` validates the submitted URL and returns `422` with a JSON body containing `detail` when the URL is missing, non-string, longer than 2048 characters, not an absolute `http` or `https` URL, contains userinfo, contains control characters anywhere, or has a host that is empty or contains whitespace/control characters."
+    },
+    {
+      "id": "AC-6",
+      "statement": "The `short_url` field returned by `POST /api/links` is formed as `{base_url}/r/{code}` using the configured `base_url`, not the request Host header."
+    },
+    {
+      "id": "AC-7",
+      "statement": "Code generation retries at most 5 times on collisions; if a unique code cannot be allocated after 5 collisions, the API returns `503` with `{\"detail\":\"could not allocate code\"}`."
+    },
+    {
+      "id": "AC-8",
+      "statement": "`GET /r/{code}` returns `302` with a `Location` header pointing to the stored target URL for known codes, increments `click_count` atomically in the same transaction, and returns `404` for unknown codes."
+    },
+    {
+      "id": "AC-9",
+      "statement": "If the database write associated with `GET /r/{code}` fails, the endpoint returns `503` and does not issue a redirect."
+    },
+    {
+      "id": "AC-10",
+      "statement": "`HEAD /r/{code}` returns `302` with `Location` for known codes, `404` for unknown codes, and does not increment `click_count`; other methods on `/r/{code}` return `405`."
+    },
+    {
+      "id": "AC-11",
+      "statement": "`GET /api/links/{code}/stats` returns `200` with `code`, `url`, `created_at`, and `click_count` for known codes, and `404` for unknown codes."
+    },
+    {
+      "id": "AC-12",
+      "statement": "`GET /healthz` returns `200` with `{\"status\":\"ok\"}`."
+    },
+    {
+      "id": "AC-13",
+      "statement": "`GET /readyz` returns `200` with `{\"status\":\"ready\"}` when a fresh database connection can execute `SELECT 1`, otherwise returns `503` with `{\"status\":\"unavailable\"}`."
+    },
+    {
+      "id": "AC-14",
+      "statement": "The application never fetches destination URLs and never stores visitor IP addresses or user agents."
+    },
+    {
+      "id": "AC-15",
+      "statement": "All SQL uses parameterized queries, and link data persists across process restarts when the same `db_path` is used."
+    }
+  ],
+  "blocking_questions": [],
+  "non_blocking_questions": [],
+  "risk_tags": [
+    "sqlite-concurrency",
+    "input-validation",
+    "persistence",
+    "transactionality",
+    "redirect-safety",
+    "code-collision",
+    "test-determinism"
+  ],
+  "notes": "No clarification history was provided. The raw requirement is broader than the target contract, so the implementation should follow the authoritative contract exactly and avoid adding unrelated scope."
+}
