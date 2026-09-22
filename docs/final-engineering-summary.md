@@ -27,7 +27,7 @@ scenarios (`PROJECT-SPEC.md`, `BUILD-AND-DEMO.md`).
   from the coordinator actually running the pipeline, in both fixture and live modes.
 - **Minimal UI + full-parity CLI** (`coordinator/api.py`, `coordinator/cli.py`, `ui/templates/`).
 - **Trusted acceptance tests** (`trusted_tests/`, mounted read-only into the worker) and the
-  **coordinator's own test suite** (`tests/`, 54 tests) covering every orchestration control the brief
+  **coordinator's own test suite** (`tests/`, 71 tests as of the code-review fix pass) covering every orchestration control the brief
   lists — cycles/gates, approval blocking and invalidation, parallel-branch overlap and join, bounded
   repair and rollback with hash evidence, safe stop, resume/reconciliation without duplicate mutation,
   replanning invalidation, policy escape attempts, untrusted-text injection, and metric-formula
@@ -55,7 +55,7 @@ authentication, and the five roles sharing one adapter process.
 
 ## Validation performed
 
-- 54 coordinator unit/integration tests, all passing (`docs/testing-report.md`).
+- 71 coordinator unit/integration tests, all passing (55 from the original build, 16 added closing the code-review findings) (`docs/testing-report.md`).
 - All three trusted test stages (A/B/C, 20+34+43 = 97 assertions worth of scenarios) passing against
   hand-written reference implementations, inside the real Docker isolation boundary.
 - Fixture-mode end-to-end runs for scenario A, scenario B (normal + labeled fault-injection recovery),
@@ -94,3 +94,13 @@ table with the checker's own evidence.
   live), and independently checked. See `docs/limitations.md` for the honestly-scoped-out items (auth,
   multi-tenancy, hosted deployment, hardened multi-tenant sandboxing, general secret scanning) that were
   never in scope for this one-day local prototype.
+- **Correction (T-002 code review, finding noted in "Assignment and evidence assessment"):** the original
+  task spec's AC-14 and AC-15 literally say "live run" for the brownfield and ambiguous scenarios. Only
+  scenario A (greenfield) has been demonstrated end to end against a real OpenAI model
+  (`docs/live-evidence.md`); scenarios B and C's stored evidence (`docs/scenarios.md`) is fixture-mode,
+  which exercises the same orchestration engine, gates, and trusted-test validation but not live model
+  reasoning for those two scenarios specifically. That gap is real: AC-14/AC-15's literal wording is
+  stronger than the delivered evidence for B and C. It is disclosed here rather than left implicit, and
+  reproducing it live is a matter of time/API cost (each end-to-end live scenario run takes several
+  minutes across 5+ sequential model calls; see `docs/live-evidence.md` reproduction steps), not a
+  structural limitation of the system.

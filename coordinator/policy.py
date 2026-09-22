@@ -74,13 +74,24 @@ def normalize_candidate_path(raw: str) -> str:
 
 
 def check_allowed_paths(norm: str, allowed_globs: tuple[str, ...]) -> None:
-    """Task-level allowed paths from the approved plan (glob prefixes). Empty means candidate defaults."""
+    """Task-level allowed paths from the approved plan: exact filenames, or a directory prefix ending in
+    `/*` (or bare `*`). An entry with no wildcard authorizes only that exact path, never a sibling file
+    with an appended suffix (`app/main.py` must not also authorize `app/main.py.bak`)."""
     if not allowed_globs:
         return
     from fnmatch import fnmatch
 
     for g in allowed_globs:
-        if fnmatch(norm, g) or norm.startswith(g.rstrip("*")):
+        if fnmatch(norm, g):
+            return
+        if g.endswith("*"):
+            prefix = g[:-1]
+            # A directory-prefix glob like "app/*" authorizes anything under app/; require the boundary
+            # to fall on a path separator (or the glob to already end in one) so "app/m*" doesn't also
+            # match "appendix/x" and "app*" doesn't also match "application/x" one level too broadly.
+            if norm.startswith(prefix) and (prefix.endswith("/") or norm[len(prefix) :].startswith("/") or prefix == ""):
+                return
+        elif norm == g:
             return
     raise PolicyViolation("task_scope", f"path {norm!r} is outside the task's approved allowed_paths {list(allowed_globs)}")
 

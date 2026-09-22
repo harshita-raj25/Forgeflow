@@ -21,15 +21,30 @@ TEMPLATES = Jinja2Templates(directory=str(PROMPTS_DIR.parent / "ui" / "templates
 def build_app(coord) -> FastAPI:
     app = FastAPI(title="ForgeFlow")
     csrf_tokens: set[str] = set()
+    # Finding #6: the prior check compared Origin against request.url.netloc, which FastAPI derives from
+    # the client-supplied Host header -- an attacker who controls Host (DNS rebinding) trivially controls
+    # both sides of that comparison. Trusted hosts/origins are a fixed allowlist derived once from
+    # configuration, never from the incoming request.
+    trusted_hosts = {"127.0.0.1", "localhost", coord.settings.bind_host}
+    trusted_origins = {f"http://{h}:{coord.settings.bind_port}" for h in trusted_hosts} | {
+        f"https://{h}:{coord.settings.bind_port}" for h in trusted_hosts
+    }
 
-    def new_csrf() -> str:
+    def check_trusted_host(request: Request) -> None:
+        host = (request.headers.get("host") or "").split(":")[0]
+        if host not in trusted_hosts:
+            raise HTTPException(403, "untrusted Host header")
+
+    def new_csrf(request: Request) -> str:
+        check_trusted_host(request)
         t = secrets.token_urlsafe(24)
         csrf_tokens.add(t)
         return t
 
     def check_csrf(request: Request, token: str) -> None:
+        check_trusted_host(request)
         origin = request.headers.get("origin")
-        if origin and origin not in (f"http://{request.url.netloc}", f"https://{request.url.netloc}"):
+        if origin and origin not in trusted_origins:
             raise HTTPException(403, "cross-origin request rejected")
         if token not in csrf_tokens:
             raise HTTPException(403, "invalid or reused CSRF token")
@@ -38,7 +53,7 @@ def build_app(coord) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         runs = coord.store.list_runs()
-        return TEMPLATES.TemplateResponse(request, "index.html", {"runs": runs, "scenarios": list_scenarios(), "csrf": new_csrf()})
+        return TEMPLATES.TemplateResponse(request, "index.html", {"runs": runs, "scenarios": list_scenarios(), "csrf": new_csrf(request)})
 
     @app.post("/runs")
     def create_run(request: Request, scenario: str = Form(...), csrf: str = Form(...), inject_fault: bool = Form(False)):
@@ -53,7 +68,7 @@ def build_app(coord) -> FastAPI:
             v = coord.snapshot_view(run_id)
         except KeyError:
             raise HTTPException(404, "unknown run") from None
-        return TEMPLATES.TemplateResponse(request, "run.html", {"v": v, "csrf": new_csrf()})
+        return TEMPLATES.TemplateResponse(request, "run.html", {"v": v, "csrf": new_csrf(request)})
 
     @app.get("/runs/{run_id}/events.json")
     def run_events(run_id: str):

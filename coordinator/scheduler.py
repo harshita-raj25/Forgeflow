@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import shutil
 import threading
 import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import replace
 from pathlib import Path
 
 from .adapters.base import AdapterError, BudgetExhausted, InvalidModelOutput, ModelAdapter, ModelRequest, ModelResponse
@@ -26,6 +28,16 @@ from .workspace import Workspace
 
 RERUNNABLE = {"PENDING", "INVALIDATED", "INTERRUPTED"}
 INJECTED_FAULT_MARKER = "FORGEFLOW_INJECTED_FAULT"
+
+# A genuine pytest process always ends with a summary line, even for zero collected tests
+# ("N passed", "N failed", "N error", or the bare "no tests ran"/"no tests collected"). Its complete
+# absence from stdout on an exit-0 run is the signature of the process having been torn down before
+# pytest itself could report -- e.g. candidate code calling os._exit() during collection/import.
+_PYTEST_SUMMARY_RE = re.compile(r"\d+\s+(passed|failed|error|skipped|warning)|no tests (ran|collected)", re.IGNORECASE)
+
+
+def pytest_summary_present(stdout: str) -> bool:
+    return bool(_PYTEST_SUMMARY_RE.search(stdout or ""))
 
 
 class NodeFailure(Exception):
@@ -49,6 +61,15 @@ class Coordinator:
         self.owner = f"sched-{uuid.uuid4().hex[:8]}"
         self._stop_flags: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
+        self._active_runs: set[str] = set()  # in-process reentrancy guard: one resume() executing per run
+        self._run_locks: dict[str, threading.Lock] = {}  # per-run critical section for stale-check + promote
+
+    def _run_lock(self, run_id: str) -> threading.Lock:
+        with self._lock:
+            lk = self._run_locks.get(run_id)
+            if lk is None:
+                lk = self._run_locks[run_id] = threading.Lock()
+            return lk
 
     # ------------------------------------------------------------------ paths
     def run_dir(self, run_id: str) -> Path:
@@ -226,8 +247,14 @@ class Coordinator:
         return rev
 
     def _revise(self, run_id: str, text: str, reason: str, clarifications: list, actor: str) -> int:
-        """Replanning semantics (PROJECT-SPEC §8): new revision, pause, invalidate affected + dependents, invalidate approvals."""
-        with self.store.conn():
+        """Replanning semantics (PROJECT-SPEC §8): new revision, pause, invalidate affected + dependents, invalidate approvals.
+
+        Holds the same per-run lock a stale-sensitive node handler (implement, plan) holds around its
+        check-then-write: whichever side acquires the lock first is fully ordered relative to the other,
+        so a node's write and this revision's invalidation can never interleave in a way where the
+        recorded verdict (CANCELLED/stale) disagrees with what was actually written to disk.
+        """
+        with self._run_lock(run_id), self.store.conn():
             rev = self.store.add_requirement_revision(run_id, text, reason, clarifications, actor=actor)
             g = TaskGraph.from_dict(self.store.get_graph(run_id)["graph"])
             affected = g.affected_by_inputs({"requirement"})
@@ -267,26 +294,54 @@ class Coordinator:
         return d
 
     # ------------------------------------------------------------- execution
+    class _ConcurrentResumeError(RuntimeError):
+        pass
+
+    class _ModeMismatchError(RuntimeError):
+        pass
+
     def resume(self, run_id: str) -> dict:
-        """Execute until the run waits for a human, finishes, or stops. Safe to call repeatedly."""
-        self.store.acquire_lease(run_id, self.owner)
+        """Execute until the run waits for a human, finishes, or stops. Safe to call repeatedly.
+
+        Refuses to run concurrently with another resume() for the same run in this process (a second
+        overlapping HTTP request cannot double-dispatch), and refuses when the configured adapter's
+        execution_mode does not match the run's persisted mode (a live run can never silently consume
+        fixture responses, or vice versa).
+        """
         with self._lock:
-            self._stop_flags.setdefault(run_id, threading.Event()).clear()
+            if run_id in self._active_runs:
+                raise Coordinator._ConcurrentResumeError(
+                    f"run {run_id} is already being resumed by this process; refusing a second concurrent resume()"
+                )
+            self._active_runs.add(run_id)
         try:
-            self._reconcile(run_id)
             run = self.store.get_run(run_id)
-            if run["status"] in TERMINAL_RUN:
-                return run
-            if run["status"] in ("WAITING_FOR_INPUT", "WAITING_FOR_APPROVAL"):
-                if not self._wait_resolved(run_id, run):
+            if run["mode"] != self.adapter.execution_mode:
+                raise Coordinator._ModeMismatchError(
+                    f"run {run_id} was created with mode={run['mode']!r} but this coordinator's adapter is "
+                    f"execution_mode={self.adapter.execution_mode!r}; refusing to resume with a mismatched adapter"
+                )
+            self.store.acquire_lease(run_id, self.owner)
+            with self._lock:
+                self._stop_flags.setdefault(run_id, threading.Event()).clear()
+            try:
+                self._reconcile(run_id)
+                run = self.store.get_run(run_id)
+                if run["status"] in TERMINAL_RUN:
                     return run
-            self.store.set_status(run_id, "RUNNING", reason="resume")
-            self._loop(run_id)
-        except StopRequested:
-            pass
+                if run["status"] in ("WAITING_FOR_INPUT", "WAITING_FOR_APPROVAL"):
+                    if not self._wait_resolved(run_id, run):
+                        return run
+                self.store.set_status(run_id, "RUNNING", reason="resume")
+                self._loop(run_id)
+            except StopRequested:
+                pass
+            finally:
+                self.store.release_lease(run_id, self.owner)
+            return self.store.get_run(run_id)
         finally:
-            self.store.release_lease(run_id, self.owner)
-        return self.store.get_run(run_id)
+            with self._lock:
+                self._active_runs.discard(run_id)
 
     def _wait_resolved(self, run_id: str, run: dict) -> bool:
         if run["status"] == "WAITING_FOR_INPUT":
@@ -324,6 +379,7 @@ class Coordinator:
         try:
             while True:
                 self._check_stop(run_id)
+                self.store.acquire_lease(run_id, self.owner)  # renew: a long live call must not let the lease lapse
                 run = self.store.get_run(run_id)
                 if run["status"] != "RUNNING":
                     break
@@ -659,10 +715,21 @@ class Coordinator:
         rel = f"plan-r{req['revision']}.json"
         _, h = ws.write_artifact(rel, json.dumps(plan, indent=2))
         art = self.store.add_artifact(run_id, "plan", f"artifacts/{rel}", h, aid, [], req["revision"], None)
-        prev = self.store.get_graph(run_id)
-        old = TaskGraph.from_dict(prev["graph"])
-        diff = diff_graphs(old, graph)
-        self.store.add_graph_revision(run_id, graph.to_dict(), req["revision"], f"plan for requirement revision {req['revision']}", diff)
+        # Same promote-or-discard discipline as implement (finding #1): a graph revision this plan attempt
+        # is about to publish must not land after a concurrent requirement revision already moved on.
+        with self._run_lock(run_id):
+            if self.store.get_run(run_id)["requirement_revision"] != req["revision"]:
+                raise NodeFailure(
+                    "stale",
+                    "requirement changed before this plan could be published; discarding without publishing a graph revision",
+                    repairable=False,
+                )
+            prev = self.store.get_graph(run_id)
+            old = TaskGraph.from_dict(prev["graph"])
+            diff = diff_graphs(old, graph)
+            self.store.add_graph_revision(
+                run_id, graph.to_dict(), req["revision"], f"plan for requirement revision {req['revision']}", diff
+            )
         self.store.append_event(
             run_id,
             "decision",
@@ -695,9 +762,18 @@ class Coordinator:
             )
         resp = self._call_model(run_id, "implementer", node.task_id, "\n\n".join(parts), aid, revision=run["candidate_revision"] + 1)
         edits = validate_edits(resp.data["edits"], self.settings.budget, node.allowed_paths)
-        pre_hash = ws.candidate_hash()
-        records = ws.apply_edits(edits)
-        post_hash = ws.candidate_hash()
+        # Promote-or-discard atomically with any concurrent replan: hold the same per-run lock _revise()
+        # holds, and recheck freshness under it immediately before writing. If a revision landed between
+        # this attempt's dispatch and now, the write never happens -- the eventual CANCELLED/stale verdict
+        # then actually matches what's on disk, closing the race the code review flagged (finding #1).
+        with self._run_lock(run_id):
+            if self._stale(run_id, run, req):
+                raise NodeFailure(
+                    "stale", "requirement or graph changed before edits could be promoted; discarding without writing", repairable=False
+                )
+            pre_hash = ws.candidate_hash()
+            records = ws.apply_edits(edits)
+            post_hash = ws.candidate_hash()
         rel = f"edits-{node.task_id}-c{run['candidate_revision'] + 1}-{aid[-6:]}.json"
         _, h = ws.write_artifact(
             rel, json.dumps({"rationale": resp.data["rationale"], "notes": resp.data["notes"], "records": records}, indent=2)
@@ -808,14 +884,27 @@ class Coordinator:
                 on_start=lambda cname, pid: self.store.set_attempt_worker(aid, pid=pid, container_id=cname),
                 extra_env=extra_env,
             )
+            if name == "test" and r.exit_code == 0 and not pytest_summary_present(r.stdout):
+                # Finding #3: exit code 0 alone is not proof the evaluator ran to completion. Candidate
+                # code that terminates the pytest process during collection/import (e.g. os._exit(0))
+                # produces exit 0 with no pytest summary line at all -- indistinguishable from a real pass
+                # by exit code alone. A genuine pytest run always prints a summary line, even for zero
+                # collected tests ("no tests ran"). Treat its absence as a failure regardless of exit code.
+                r = replace(
+                    r,
+                    exit_code=1,
+                    stderr=r.stderr + "\n[forgeflow] REJECTED: test exit code was 0 but no pytest summary line was found in "
+                    "stdout; the evaluator process likely terminated before completing (e.g. os._exit in "
+                    "candidate code during import). Treating as failed.",
+                )
             results[name] = r
-            (vdir / f"{name}.json").write_text(json.dumps(r.as_dict(), indent=2))
+            # Finding #5: hash the exact bytes written, not a separately (differently) serialized copy.
+            record_bytes = json.dumps(r.as_dict(), indent=2)
+            (vdir / f"{name}.json").write_text(record_bytes)
             (vdir / f"{name}.stdout.txt").write_text(r.stdout)
             (vdir / f"{name}.stderr.txt").write_text(r.stderr)
             rel = str((vdir / f"{name}.json").relative_to(self.run_dir(run_id)))
-            ids.append(
-                self.store.add_artifact(run_id, "validation", rel, sha256_text(json.dumps(r.as_dict())), aid, [], req["revision"], chash)
-            )
+            ids.append(self.store.add_artifact(run_id, "validation", rel, sha256_text(record_bytes), aid, [], req["revision"], chash))
             self.store.append_event(
                 run_id,
                 "tool_result",

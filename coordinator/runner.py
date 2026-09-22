@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -126,24 +127,76 @@ class DockerRunner:
         if on_start:
             on_start(name, proc.pid)
         timed_out = False
+        killed_for_output = threading.Event()
+        # Finding #7: drain each stream incrementally in its own bounded buffer instead of letting
+        # communicate() collect everything in host memory before truncate() ever runs. A producer that
+        # exceeds the configured cap gets the worker killed immediately, rather than being allowed to
+        # keep writing into an unbounded Python string until it happens to finish or time out.
+        out_box: dict = {}
+        err_box: dict = {}
+
+        def kill_for_overrun() -> None:
+            if not killed_for_output.is_set():
+                killed_for_output.set()
+                self.kill(name)
+
+        t_out = threading.Thread(target=self._drain_bounded, args=(proc.stdout, self.max_output, out_box, kill_for_overrun), daemon=True)
+        t_err = threading.Thread(target=self._drain_bounded, args=(proc.stderr, self.max_output, err_box, kill_for_overrun), daemon=True)
+        t_out.start()
+        t_err.start()
         try:
-            out, err = proc.communicate(timeout=timeout)
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             self.kill(name)
-            out, err = proc.communicate()
-        finally:
-            self._active.pop(name, None)
+        t_out.join(timeout=10)
+        t_err.join(timeout=10)
+        self._active.pop(name, None)
+        out = out_box.get("text", "")
+        err = err_box.get("text", "")
+        if out_box.get("truncated"):
+            out += f"\n...[truncated at {self.max_output} bytes during collection]"
+        if err_box.get("truncated"):
+            err += f"\n...[truncated at {self.max_output} bytes during collection]"
         return RunResult(
             command=" ".join(cmd),
-            exit_code=proc.returncode if not timed_out else 124,
-            stdout=truncate(out or "", self.max_output),
-            stderr=truncate(err or "", self.max_output),
+            exit_code=proc.returncode if proc.returncode is not None else (124 if timed_out else 137),
+            stdout=truncate(out, self.max_output),
+            stderr=truncate(err, self.max_output),
             duration_ms=int((time.monotonic() - started) * 1000),
             timed_out=timed_out,
             container_id=name,
             tool_versions=self.tool_versions(),
         )
+
+    @staticmethod
+    def _drain_bounded(stream, cap: int, box: dict, on_overrun) -> None:
+        """Read a subprocess pipe in small chunks, keeping at most ~cap bytes in memory. Calls on_overrun()
+        the first time the budget is exceeded so the caller can terminate the producer immediately."""
+        chunks: list[str] = []
+        total = 0
+        truncated = False
+        try:
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total <= cap:
+                    chunks.append(chunk)
+                elif not truncated:
+                    truncated = True
+                    on_overrun()
+                    # keep draining (discarding) so the child never blocks on a full pipe indefinitely
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+        box["text"] = "".join(chunks)
+        box["truncated"] = truncated
 
     def run_migration(self, candidate_dir: Path, demo_dir: Path, timeout_s: float | None = None, on_start=None) -> RunResult:
         """Apply the candidate's schema migration to the copied demo DB via the trusted migration tool."""
