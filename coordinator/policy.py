@@ -24,6 +24,7 @@ FIXED_COMMANDS: dict[str, list[str]] = {
     "lint": ["ruff", "check", "--no-cache", "--quiet", "/work/candidate"],
     "test": ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--timeout=100", "/work/trusted_tests"],
     "migrate": ["python", "/work/trusted_tests/tools/migrate_demo.py", "/work/demo/demo.db"],
+    "isolation_check": ["python", "/work/trusted_tests/tools/check_isolation.py"],
 }
 
 # Paths inside a candidate workspace that generated code may write.

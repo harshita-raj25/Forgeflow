@@ -18,7 +18,7 @@
 | Resume/restart reconciliation, no duplicate mutation | Yes | `tests/test_orchestration_e2e.py::test_resume_after_interrupt_reconciles_without_duplicate_mutation`, `test_export_is_idempotent_for_same_candidate_hash` | `operations` table + `INTERRUPTED` reconciliation |
 | Event hash chain | Yes | `tests/test_store.py::test_event_chain_verifies_and_detects_tamper` | not tamper-proof storage; see `docs/limitations.md` |
 | Secret redaction in events/exports | Yes | `tests/test_store.py::test_secrets_are_redacted_in_events` | heuristic; see `docs/limitations.md` |
-| Worker container: no network, no credentials, no Docker socket, unprivileged | Yes | manual container inspection + `coordinator/policy.py::worker_env` assertion | `docker/Dockerfile.worker`, `DockerRunner.docker_args` |
+| Worker container: no network, no credentials, no Docker socket, unprivileged, read-only root | Yes | `tests/test_orchestration_e2e.py::test_worker_container_isolation_holds_at_runtime` (a probe, `trusted_tests/tools/check_isolation.py`, runs *inside* the container and asserts each property at runtime, not just the docker-run flags) | `docker/Dockerfile.worker`, `DockerRunner.docker_args`, `coordinator/policy.py::worker_env` |
 | Metrics computed from events, zero-sample N/A | Yes | `tests/test_metrics.py` | no hard-coded favorable numbers |
 | Fixture vs live mode visibly distinct everywhere | Yes | `run.mode`, every export's `run-summary.md`/`export-meta.json`, UI badge | `Coordinator._call_model` refuses a mode mismatch |
 

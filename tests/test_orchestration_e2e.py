@@ -263,3 +263,23 @@ def test_requirement_revision_invalidates_stale_downstream_and_reruns(sandbox):
     final = sandbox.store.get_run(rid)
     assert final["status"] == "SUCCEEDED"
     assert final["candidate_hash"] != pre_candidate_hash, "the revision must demonstrably change executable work, not just add a note"
+
+
+def test_worker_container_isolation_holds_at_runtime(sandbox):
+    """AC-8: a test asserts each isolation property from inside the container, not just docker-run flags."""
+    import json
+
+    from coordinator.policy import FIXED_COMMANDS
+
+    assert "isolation_check" in FIXED_COMMANDS
+    ws = sandbox.workspace("isolation-probe")
+    ws.init_baseline(None)
+    ws.reset_candidate_from_baseline()
+    (ws.candidate_dir / "app").mkdir(exist_ok=True)
+    (ws.candidate_dir / "app" / "__init__.py").write_text("")
+    result = sandbox.runner.run(ws.candidate_dir, "isolation_check", stage="A")
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["ok"], payload
+    for name in ("no_network", "unprivileged_uid", "no_docker_socket", "no_provider_credentials", "readonly_candidate_mount"):
+        assert payload["checks"][name]["ok"], (name, payload["checks"][name])
