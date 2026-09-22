@@ -1,0 +1,9 @@
+{
+  "id": "A_greenfield",
+  "title": "Scenario A — greenfield URL shortener",
+  "stage": "A",
+  "brownfield": false,
+  "baseline_from": null,
+  "contract_parts": ["contract_base"],
+  "requirement": "Build a local URL shortener with a creation API, redirect endpoint, aggregate click analytics, persistent storage, health endpoints, tests, and setup instructions."
+}

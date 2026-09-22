@@ -1,0 +1,67 @@
+{
+  "design_summary": "Single FastAPI app package app/ backed by sqlite3 (stdlib), per-request connections, atomic click increments, secure random codes with bounded collision retry.",
+  "impact_map": [
+    {
+      "path": "app/main.py",
+      "symbol": "create_app",
+      "change": "create",
+      "reason": "New service; no existing baseline."
+    }
+  ],
+  "migration": {
+    "required": false,
+    "description": "",
+    "additive_only": true
+  },
+  "tasks": [
+    {
+      "task_id": "t1",
+      "title": "Implement the shortener service",
+      "dependencies": [],
+      "allowed_paths": [
+        "app/*"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5",
+        "AC-6",
+        "AC-7"
+      ],
+      "risk_level": "medium",
+      "instructions": "Implement app/main.py exactly per the target contract: create_app factory, sqlite3 schema, all endpoints, validation, secure code generation with 5-attempt bounded retry, atomic increment, health/ready checks."
+    },
+    {
+      "task_id": "t2",
+      "title": "Add agent-authored smoke tests and README",
+      "dependencies": [
+        "t1"
+      ],
+      "allowed_paths": [
+        "tests/*",
+        "README.md"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2"
+      ],
+      "risk_level": "low",
+      "instructions": "Add a small pytest smoke test under tests/ exercising create+redirect+stats, and a README with run/test instructions."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Use stdlib sqlite3 with per-request connections instead of an ORM.",
+      "rationale": "Keeps the dependency surface minimal and matches the trusted test import contract."
+    }
+  ],
+  "required_approvals": [
+    "plan",
+    "release"
+  ],
+  "risks": [
+    "SQLite is single-file and not horizontally scalable; acceptable for a local prototype."
+  ]
+}

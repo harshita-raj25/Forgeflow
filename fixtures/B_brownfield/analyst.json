@@ -1,0 +1,37 @@
+{
+  "normalized_requirement": "Add optional user-selected custom aliases to link creation without breaking existing links or clients; duplicate alias returns a clear conflict.",
+  "assumptions": [
+    "Aliases share the same code column/namespace as generated codes.",
+    "Alias pattern ^[A-Za-z0-9_-]{4,32}$, case-sensitive.",
+    "A fixed reserved-name list is rejected."
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "statement": "POST /api/links accepts optional custom_alias; valid alias is stored as code and returned."
+    },
+    {
+      "id": "AC-2",
+      "statement": "Invalid alias pattern or reserved alias returns 422."
+    },
+    {
+      "id": "AC-3",
+      "statement": "Duplicate alias returns 409."
+    },
+    {
+      "id": "AC-4",
+      "statement": "Requests without custom_alias behave exactly as before."
+    },
+    {
+      "id": "AC-5",
+      "statement": "Existing rows, generated codes, and click counts are preserved unchanged."
+    }
+  ],
+  "blocking_questions": [],
+  "non_blocking_questions": [],
+  "risk_tags": [
+    "breaking-change-risk",
+    "public-api"
+  ],
+  "notes": "Brownfield; contract for aliases is fully specified, no clarification needed."
+}

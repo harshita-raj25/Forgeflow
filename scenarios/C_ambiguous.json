@@ -1,0 +1,21 @@
+{
+  "id": "C_ambiguous",
+  "title": "Scenario C — ambiguous requirement: safer shared links",
+  "stage": "C",
+  "brownfield": true,
+  "baseline_from": "B_brownfield",
+  "contract_parts": ["contract_base", "contract_alias", "contract_expiry"],
+  "requirement": "Make shared links safer. Old campaign links should stop working, and we need useful analytics.",
+  "seed_links": [
+    {"code": "Ab3dEf7h", "url": "https://example.com/campaign/spring", "created_at": "2026-09-01T10:00:00Z", "clicks": 12},
+    {"code": "spring-sale", "url": "https://example.com/campaign/spring-sale", "created_at": "2026-09-05T10:00:00Z", "clicks": 40},
+    {"code": "Zy9xWv5u", "url": "https://example.org/docs", "created_at": "2026-09-02T11:30:00Z", "clicks": 3}
+  ],
+  "suggested_answers": [
+    {"topic": "what makes a link old", "answer": "Expiry is optional and explicitly set per link using a UTC timestamp (expires_at) at creation; there is no automatic age-based expiry."},
+    {"topic": "existing links", "answer": "Links without expiry remain valid forever, including all existing links (NULL expires_at)."},
+    {"topic": "expired response", "answer": "An expired link must respond with HTTP 404 and must not increment the click count; aggregate successful-click counts remain readable via stats."},
+    {"topic": "analytics", "answer": "Only aggregate successful redirect counts per link plus expiry status in stats. Do not collect visitor identity, IP, user agent, or detailed tracking."}
+  ],
+  "revision_text": "Make shared links safer. Old campaign links should stop working, and we need useful analytics. REVISION: an expired link must respond with HTTP 410 Gone (not 404) and must not increment the click count."
+}

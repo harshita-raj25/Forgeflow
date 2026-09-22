@@ -1,0 +1,83 @@
+{
+  "design_summary": "Add a nullable expires_at column via additive migration; check expiry using an injected clock; return 410 for expired redirects without incrementing the counter.",
+  "impact_map": [
+    {
+      "path": "app/main.py",
+      "symbol": "create_app",
+      "change": "extend",
+      "reason": "Add additive ALTER TABLE for expires_at on schema init."
+    },
+    {
+      "path": "app/main.py",
+      "symbol": "create_link",
+      "change": "extend",
+      "reason": "Accept and validate optional expires_at."
+    },
+    {
+      "path": "app/main.py",
+      "symbol": "redirect",
+      "change": "extend",
+      "reason": "Return 410 and skip the increment when expired."
+    },
+    {
+      "path": "app/main.py",
+      "symbol": "stats",
+      "change": "extend",
+      "reason": "Expose expires_at and active/expired status."
+    }
+  ],
+  "migration": {
+    "required": true,
+    "description": "Additive nullable ALTER TABLE links ADD COLUMN expires_at TEXT; existing rows default to NULL (never expires).",
+    "additive_only": true
+  },
+  "tasks": [
+    {
+      "task_id": "t1",
+      "title": "Add optional expiry with additive migration",
+      "dependencies": [],
+      "allowed_paths": [
+        "app/*"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5"
+      ],
+      "risk_level": "high",
+      "instructions": "Extend app/main.py per the expiry addendum: additive expires_at column, validate future-only timestamps, injected-clock expiry check, return 410 without incrementing when expired, expose status in stats. Preserve alias and stage-A behavior."
+    },
+    {
+      "task_id": "t2",
+      "title": "Add expiry boundary tests",
+      "dependencies": [
+        "t1"
+      ],
+      "allowed_paths": [
+        "tests/*"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-3",
+        "AC-5"
+      ],
+      "risk_level": "low",
+      "instructions": "Add agent-authored pytest coverage for before/at/after the expiry boundary using an injected clock."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Use an injected now() callable rather than wall-clock time.",
+      "rationale": "Makes the expiry boundary deterministically testable."
+    }
+  ],
+  "required_approvals": [
+    "plan",
+    "migration",
+    "release"
+  ],
+  "risks": [
+    "Schema change requires migration approval and a demo-data backup/restore rehearsal."
+  ]
+}

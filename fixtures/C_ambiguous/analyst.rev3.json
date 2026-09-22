@@ -1,0 +1,35 @@
+{
+  "normalized_requirement": "Add optional per-link expiry (expires_at, UTC, set at creation, future timestamps only). Existing links never expire. An expired link's redirect returns 410 Gone and does not increment the click count; stats remain readable and expose expiry status. No new visitor-identity analytics.",
+  "assumptions": [
+    "Additive nullable expires_at column; NULL means never expires.",
+    "Only aggregate click counts are required; no visitor tracking."
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "statement": "POST /api/links accepts optional future expires_at; past/invalid timestamps return 422."
+    },
+    {
+      "id": "AC-2",
+      "statement": "Existing links (expires_at NULL) never expire."
+    },
+    {
+      "id": "AC-3",
+      "statement": "An expired link's GET/HEAD /r/{code} returns 410 and does not increment click_count."
+    },
+    {
+      "id": "AC-4",
+      "statement": "Stats remain readable for expired links and expose status active/expired."
+    },
+    {
+      "id": "AC-5",
+      "statement": "The additive migration preserves existing rows and click counts."
+    }
+  ],
+  "blocking_questions": [],
+  "non_blocking_questions": [],
+  "risk_tags": [
+    "data-migration"
+  ],
+  "notes": "Requirement revised: expired-link response changed from 404 to 410 Gone."
+}

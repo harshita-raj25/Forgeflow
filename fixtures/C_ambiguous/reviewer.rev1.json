@@ -1,0 +1,10 @@
+{
+  "verdict": "pass",
+  "findings": [],
+  "security_notes": [
+    "No visitor identity collected; migration is additive and backed up before apply."
+  ],
+  "compatibility_notes": [
+    "Existing links (NULL expires_at) never expire; alias and stage-A behavior preserved."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "design_summary": "Extend create_link to accept an optional custom_alias, validate it, and attempt the same insert-if-absent transaction used for generated codes, sharing the links.code namespace. No schema change.",
+  "impact_map": [
+    {
+      "path": "app/main.py",
+      "symbol": "create_link",
+      "change": "extend",
+      "reason": "Add custom_alias handling to the existing creation endpoint."
+    },
+    {
+      "path": "app/main.py",
+      "symbol": "create_app",
+      "change": "keep",
+      "reason": "Schema and other endpoints are unaffected; no migration needed."
+    }
+  ],
+  "migration": {
+    "required": false,
+    "description": "custom_alias reuses the existing code column; no schema change.",
+    "additive_only": true
+  },
+  "tasks": [
+    {
+      "task_id": "t1",
+      "title": "Add custom alias support to link creation",
+      "dependencies": [],
+      "allowed_paths": [
+        "app/*"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5"
+      ],
+      "risk_level": "medium",
+      "instructions": "Extend app/main.py per the alias addendum: validate custom_alias (pattern + reserved list), insert it as code inside the existing transaction, return 409 on conflict, 422 on invalid/reserved. Keep all stage-A behavior identical when custom_alias is absent."
+    },
+    {
+      "task_id": "t2",
+      "title": "Add alias tests",
+      "dependencies": [
+        "t1"
+      ],
+      "allowed_paths": [
+        "tests/*"
+      ],
+      "acceptance_criteria_ids": [
+        "AC-1",
+        "AC-2",
+        "AC-3"
+      ],
+      "risk_level": "low",
+      "instructions": "Add agent-authored pytest coverage for a valid alias, an invalid alias, and a duplicate alias."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Reuse the code column and existing uniqueness constraint for aliases rather than a separate table.",
+      "rationale": "Matches the requirement that aliases share the generated-code namespace and avoids a schema change."
+    }
+  ],
+  "required_approvals": [
+    "plan",
+    "release"
+  ],
+  "risks": [
+    "A malicious alias could collide with a reserved route name; mitigated by the fixed reserved-name list."
+  ]
+}

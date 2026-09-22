@@ -1,0 +1,10 @@
+{
+  "readme_markdown": "# URL Shortener\n\nRun: `SHORTENER_DB_PATH=/tmp/shortener.db BASE_URL=http://localhost:8000 uvicorn app.main:app`\n\nTest: `python -m pytest -q tests`\n\nEndpoints: POST /api/links, GET /r/{code}, GET /api/links/{code}/stats, GET /healthz, GET /readyz.\n",
+  "api_markdown": "# API\n\n- `POST /api/links` `{url}` -> 201 `{code, short_url, url, created_at}`\n- `GET /r/{code}` -> 302 or 404\n- `GET /api/links/{code}/stats` -> 200 or 404\n- `GET /healthz` -> 200\n- `GET /readyz` -> 200 or 503\n",
+  "limitations": [
+    "No authentication or abuse protection.",
+    "SQLite is local, single-file, not for public scale.",
+    "No destination fetching or link previews."
+  ],
+  "summary": "Greenfield URL shortener implementing creation, redirect, stats, and health endpoints over SQLite."
+}

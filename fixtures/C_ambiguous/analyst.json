@@ -1,0 +1,33 @@
+{
+  "normalized_requirement": "",
+  "assumptions": [],
+  "acceptance_criteria": [],
+  "blocking_questions": [
+    {
+      "id": "Q1",
+      "question": "What makes a link 'old' \u2014 automatic age-based expiry, or an explicit expires_at set per link?",
+      "why_blocking": "Determines whether expiry is a scheduled job or a stored per-link timestamp; changes the schema and logic."
+    },
+    {
+      "id": "Q2",
+      "question": "What should happen to links created before this change \u2014 do they expire too?",
+      "why_blocking": "Determines default value and migration behavior for existing rows."
+    },
+    {
+      "id": "Q3",
+      "question": "What HTTP status should an expired link return?",
+      "why_blocking": "Directly changes the redirect endpoint's contract and trusted tests."
+    },
+    {
+      "id": "Q4",
+      "question": "What analytics are needed beyond the existing aggregate click count?",
+      "why_blocking": "Determines whether new fields or endpoints are required."
+    }
+  ],
+  "non_blocking_questions": [],
+  "risk_tags": [
+    "ambiguous-requirement",
+    "breaking-change-risk"
+  ],
+  "notes": "Requirement text does not define expiry semantics or the expired response code; pausing for clarification before any design."
+}

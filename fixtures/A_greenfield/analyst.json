@@ -1,0 +1,45 @@
+{
+  "normalized_requirement": "Provide a local URL shortener with link creation, redirect, aggregate click analytics, persistent SQLite storage, health/readiness endpoints, tests and setup docs.",
+  "assumptions": [
+    "No authentication or multi-tenancy.",
+    "8-character codes with a cryptographically secure generator.",
+    "Analytics are aggregate click counts only, no visitor identity."
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "statement": "POST /api/links creates a link and returns code, short_url, url, created_at with 201."
+    },
+    {
+      "id": "AC-2",
+      "statement": "GET /r/{code} returns 302 to the target and increments click_count once; unknown code returns 404."
+    },
+    {
+      "id": "AC-3",
+      "statement": "HEAD /r/{code} returns 302/404 without incrementing click_count."
+    },
+    {
+      "id": "AC-4",
+      "statement": "GET /api/links/{code}/stats returns code, url, created_at, click_count; unknown returns 404."
+    },
+    {
+      "id": "AC-5",
+      "statement": "Invalid URLs (bad scheme, credentials, control chars, overlong) are rejected with 422."
+    },
+    {
+      "id": "AC-6",
+      "statement": "healthz and readyz report liveness and database readiness; readyz is 503 when the database is unavailable."
+    },
+    {
+      "id": "AC-7",
+      "statement": "Data persists across restarts and concurrent redirects do not lose click updates."
+    }
+  ],
+  "blocking_questions": [],
+  "non_blocking_questions": [],
+  "risk_tags": [
+    "new-service",
+    "public-api"
+  ],
+  "notes": "Greenfield; target contract fully specifies behavior, no clarification needed."
+}

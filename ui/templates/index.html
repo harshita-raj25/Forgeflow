@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ForgeFlow</title>
+<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}
+table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;font-size:.9rem}
+.badge{padding:.1rem .4rem;border-radius:.3rem;font-size:.75rem}
+.live{background:#fee2e2;color:#991b1b}.fixture{background:#e0e7ff;color:#3730a3}
+form.inline{display:inline}</style></head>
+<body>
+<h1>ForgeFlow</h1>
+<p>Local agentic SDLC workbench. Create a run for a scenario, then follow its graph, approvals and evidence.</p>
+<h2>New run</h2>
+<form method="post" action="/runs">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <select name="scenario">
+    {% for s in scenarios %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
+  </select>
+  <label><input type="checkbox" name="inject_fault" value="true"> inject labeled fault (recovery demo)</label>
+  <button type="submit">Create + run</button>
+</form>
+<h2>Runs</h2>
+<table><tr><th>id</th><th>scenario</th><th>mode</th><th>status</th><th>created</th></tr>
+{% for r in runs %}
+<tr><td><a href="/runs/{{ r.id }}">{{ r.id }}</a></td><td>{{ r.scenario }}</td>
+<td><span class="badge {{ r.mode }}">{{ r.mode }}</span></td><td>{{ r.status }}</td><td>{{ r.created_at }}</td></tr>
+{% endfor %}
+</table>
+</body></html>

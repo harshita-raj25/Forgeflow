@@ -1,0 +1,14 @@
+# ForgeFlow worker image: runs generated code and trusted tests in isolation.
+# Dependencies are pinned and installed here, in a trusted setup step. Nothing is installed at run time.
+FROM python:3.13.3-slim@sha256:56a11364ffe0fee3bd60af6d6d5209eba8a99c2c16dc4c7c5861dc06261503cc
+LABEL forgeflow.tools="python=3.13.3 fastapi=0.115.12 uvicorn=0.34.2 httpx=0.28.1 pytest=8.3.5 pytest-timeout=2.3.1 ruff=0.11.8"
+RUN pip install --no-cache-dir \
+    fastapi==0.115.12 \
+    uvicorn==0.34.2 \
+    httpx==0.28.1 \
+    pytest==8.3.5 \
+    pytest-timeout==2.3.1 \
+    ruff==0.11.8
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp
+WORKDIR /work/candidate
+USER 65534:65534

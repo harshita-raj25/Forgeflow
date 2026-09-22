@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "rationale": {
+      "type": "string"
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "write",
+              "delete"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "op",
+          "content"
+        ]
+      }
+    },
+    "tests_added": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "rationale",
+    "edits",
+    "tests_added",
+    "notes"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "readme_markdown": {
+      "type": "string"
+    },
+    "api_markdown": {
+      "type": "string"
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "readme_markdown",
+    "api_markdown",
+    "limitations",
+    "summary"
+  ]
+}

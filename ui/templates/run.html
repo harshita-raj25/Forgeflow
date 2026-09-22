@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Run {{ v.run.id }}</title>
+<meta http-equiv="refresh" content="4">
+<style>body{font-family:system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem}
+table{width:100%;border-collapse:collapse;margin-bottom:1rem}td,th{border-bottom:1px solid #ddd;padding:.35rem;text-align:left;font-size:.85rem}
+.badge{padding:.1rem .4rem;border-radius:.3rem;font-size:.75rem}
+.live{background:#fee2e2;color:#991b1b}.fixture{background:#e0e7ff;color:#3730a3}
+.SUCCEEDED{color:#166534}.FAILED{color:#991b1b}.RUNNING{color:#1d4ed8}.WAITING_FOR_APPROVAL,.WAITING_FOR_INPUT{color:#b45309}
+pre{background:#f8f8f8;padding:.6rem;overflow:auto;font-size:.8rem}</style></head>
+<body>
+<p><a href="/">&larr; runs</a></p>
+<h1>{{ v.run.id }} <span class="badge {{ v.run.mode }}">{{ v.run.mode }}</span></h1>
+<p>scenario: {{ v.run.scenario }} — status: <b class="{{ v.run.status }}">{{ v.run.status }}</b>
+{% if v.run.stop_reason %} — {{ v.run.stop_reason }}{% endif %}</p>
+<p>requirement rev {{ v.run.requirement_revision }} · graph rev {{ v.run.graph_revision }} · candidate rev {{ v.run.candidate_revision }}
+{% if v.run.candidate_hash %} · candidate <code>{{ v.run.candidate_hash[:16] }}</code>{% endif %}</p>
+
+<form class="inline" method="post" action="/runs/{{ v.run.id }}/resume"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Resume</button></form>
+<form class="inline" method="post" action="/runs/{{ v.run.id }}/stop"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Stop</button></form>
+<form class="inline" method="post" action="/runs/{{ v.run.id }}/export"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Export evidence</button></form>
+
+<h2>Graph</h2>
+<table><tr><th>task</th><th>kind</th><th>deps</th><th>state</th></tr>
+{% for n in v.graph.graph.nodes %}
+<tr><td>{{ n.task_id }}</td><td>{{ n.kind }}</td><td>{{ n.dependencies|join(', ') }}</td>
+<td class="{{ v.states[n.task_id] }}">{{ v.states[n.task_id] }}</td></tr>
+{% endfor %}
+</table>
+
+{% for c in v.clarifications %}{% if c.status == 'pending' %}
+<h2>Clarification needed</h2>
+<form method="post" action="/runs/{{ v.run.id }}/clarify">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="clarification_id" value="{{ c.id }}">
+{% for q in c.questions %}<p><b>{{ q.question }}</b><br><input name="answer" size="80"></p>{% endfor %}
+<button>Submit answers</button></form>
+{% endif %}{% endfor %}
+
+{% for a in v.approvals %}{% if a.status == 'pending' %}
+<h2>Approval needed: {{ a.scope }}</h2>
+<p>subject <code>{{ a.subject_hash[:16] }}</code></p>
+<form method="post" action="/runs/{{ v.run.id }}/approvals/{{ a.id }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input name="rationale" placeholder="rationale" size="60">
+<button name="decision" value="approve">Approve</button>
+<button name="decision" value="reject">Reject</button>
+</form>
+{% endif %}{% endfor %}
+
+<h2>Requirement revision</h2>
+<form method="post" action="/runs/{{ v.run.id }}/revise">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<textarea name="text" rows="3" cols="80">{{ v.requirements[-1].text }}</textarea><br>
+<input name="reason" placeholder="reason" size="60"><button>Submit revision</button>
+</form>
+
+<h2>Approvals</h2>
+<table><tr><th>scope</th><th>status</th><th>subject</th><th>decided</th></tr>
+{% for a in v.approvals %}<tr><td>{{ a.scope }}</td><td>{{ a.status }}</td><td><code>{{ a.subject_hash[:12] }}</code></td><td>{{ a.decided_at or '' }}</td></tr>{% endfor %}
+</table>
+
+<h2>Attempts</h2>
+<table><tr><th>task</th><th>#</th><th>status</th><th>started</th><th>ended</th><th>error</th></tr>
+{% for a in v.attempts %}<tr><td>{{ a.task_id }}</td><td>{{ a.attempt }}</td><td class="{{ a.status }}">{{ a.status }}</td>
+<td>{{ a.started_at }}</td><td>{{ a.ended_at or '' }}</td><td>{{ a.error_category or '' }}</td></tr>{% endfor %}
+</table>
+
+<h2>Events (<a href="/runs/{{ v.run.id }}/events.json">json</a>)</h2>
+<pre>{% for e in v.artifacts[-5:] %}{{ e.kind }} {{ e.rel_path }}
+{% endfor %}</pre>
+</body></html>

@@ -1,0 +1,9 @@
+{
+  "readme_markdown": "# URL Shortener\n\nLinks may now carry an optional future `expires_at`. Expired links respond with 410 and do not increment the click count.\n\nRun: `SHORTENER_DB_PATH=/tmp/shortener.db BASE_URL=http://localhost:8000 uvicorn app.main:app`\nTest: `python -m pytest -q tests`\n",
+  "api_markdown": "# API\n\n- `POST /api/links` `{url, custom_alias?, expires_at?}`\n- `GET /r/{code}` -> 302, 410 if expired, 404 if unknown\n- `GET /api/links/{code}/stats` now includes expires_at and status\n",
+  "limitations": [
+    "No visitor-identity analytics collected.",
+    "Expiry is per-link only, no bulk/campaign expiry."
+  ],
+  "summary": "Added optional per-link expiry via an additive migration; expired links return 410."
+}

@@ -1,0 +1,10 @@
+{
+  "verdict": "pass",
+  "findings": [],
+  "security_notes": [
+    "Reserved-name list prevents alias collision with API routes."
+  ],
+  "compatibility_notes": [
+    "Requests without custom_alias are unaffected; existing rows untouched by an additive code path."
+  ]
+}

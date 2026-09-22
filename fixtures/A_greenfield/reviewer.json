@@ -1,0 +1,10 @@
+{
+  "verdict": "pass",
+  "findings": [],
+  "security_notes": [
+    "No destination fetching; no visitor identity stored; parameterized SQL throughout."
+  ],
+  "compatibility_notes": [
+    "Greenfield service; no prior contract to break."
+  ]
+}

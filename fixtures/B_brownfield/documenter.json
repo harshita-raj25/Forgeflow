@@ -1,0 +1,9 @@
+{
+  "readme_markdown": "# URL Shortener\n\nNow supports optional `custom_alias` on creation (pattern `^[A-Za-z0-9_-]{4,32}$`, case-sensitive, shares the code namespace).\n\nRun: `SHORTENER_DB_PATH=/tmp/shortener.db BASE_URL=http://localhost:8000 uvicorn app.main:app`\nTest: `python -m pytest -q tests`\n",
+  "api_markdown": "# API\n\n- `POST /api/links` `{url, custom_alias?}` -> 201 or 422 (invalid/reserved alias) or 409 (duplicate)\n- other endpoints unchanged from stage A\n",
+  "limitations": [
+    "Reserved-alias list is fixed and may need extension for future routes.",
+    "No authentication or abuse protection."
+  ],
+  "summary": "Added custom alias support without a schema migration; existing links and clients are unaffected."
+}
