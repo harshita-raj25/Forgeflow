@@ -35,6 +35,21 @@ required controls; it does not claim enterprise production readiness.
   provider credentials or Docker socket. It is a single-host container boundary, not a hardened multi-tenant
   sandbox (no seccomp/AppArmor profile beyond Docker's defaults, no gVisor/Firecracker).
 
+## Concurrency and cross-process coordination
+- Two separate `forgeflow` CLI invocations (or a CLI invocation racing the HTTP API) safely order their
+  writes to a shared run through a real OS-level file lock (`fcntl.flock` on a per-run lock file), not
+  just an in-process `threading.Lock`. `fcntl` is POSIX-only; this assumes macOS or Linux, matching the
+  existing Docker/`os.getuid()` platform assumptions elsewhere in the coordinator. There is no Windows
+  support.
+- The lease TTL (default 60s) is kept alive by a background heartbeat thread for the duration of
+  `resume()`, independent of any single node's completion. A process that crashes without releasing its
+  lease is still correctly reclaimed once the TTL lapses (no heartbeat thread left to renew it).
+- Stop is ordered against an in-flight implement/plan write through the same file lock: it can prevent a
+  write that has not yet started its critical section, or prevent a fresh attempt from starting one after
+  Stop lands, but it cannot abort an OS-level write already in progress mid-`flock` (i.e., it is
+  check-then-act at the lock boundary, not true interruption of an in-progress filesystem write once that
+  write's own critical section has already begun).
+
 ## Model variability and budgets
 - Live model calls are bounded (90s timeout, ≤2 retries, ≤1 structured-output correction, ≤2 code-repair
   cycles, ≤30 provider calls and ≤20 minutes active execution per run). A model that produces working code

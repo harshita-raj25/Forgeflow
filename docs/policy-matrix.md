@@ -21,6 +21,9 @@
 | Worker container: no network, no credentials, no Docker socket, unprivileged, read-only root | Yes | `tests/test_orchestration_e2e.py::test_worker_container_isolation_holds_at_runtime` (a probe, `trusted_tests/tools/check_isolation.py`, runs *inside* the container and asserts each property at runtime, not just the docker-run flags) | `docker/Dockerfile.worker`, `DockerRunner.docker_args`, `coordinator/policy.py::worker_env` |
 | Metrics computed from events, zero-sample N/A | Yes | `tests/test_metrics.py` | no hard-coded favorable numbers |
 | Fixture vs live mode visibly distinct everywhere | Yes | `run.mode`, every export's `run-summary.md`/`export-meta.json`, UI badge | `Coordinator._call_model` refuses a mode mismatch |
+| Test result cannot be a false pass from candidate-controlled output | Partial | `tests/test_review_fixes.py::test_evaluator_early_exit_cannot_produce_false_pass`, `tests/test_review_fixes_2.py::test_zero_assertion_results_rejected_by_validate_node` | requires a pytest summary line AND ≥1 passed test for exit-code-0; still runs the evaluator in the same process as the candidate (not a fully separate supervised process) — see `docs/limitations.md` |
+| Cross-process stale-write / stop ordering | Yes | `tests/test_review_fixes_2.py::test_cross_process_lock_provides_real_mutual_exclusion`, `::test_stop_prevents_in_flight_write_from_landing` | `Coordinator._promote_lock` (`fcntl.flock`), shared by implement/plan promote, `revise_requirement`, and `stop()` |
+| Lease survives an in-flight long dispatch | Yes | `tests/test_review_fixes_2.py::test_lease_survives_in_flight_dispatch_via_heartbeat` | dedicated heartbeat thread renews independent of node completion |
 
 ## Deferred / out of scope (documented, not implemented)
 

@@ -27,7 +27,7 @@ scenarios (`PROJECT-SPEC.md`, `BUILD-AND-DEMO.md`).
   from the coordinator actually running the pipeline, in both fixture and live modes.
 - **Minimal UI + full-parity CLI** (`coordinator/api.py`, `coordinator/cli.py`, `ui/templates/`).
 - **Trusted acceptance tests** (`trusted_tests/`, mounted read-only into the worker) and the
-  **coordinator's own test suite** (`tests/`, 71 tests as of the code-review fix pass) covering every orchestration control the brief
+  **coordinator's own test suite** (`tests/`, 78 tests as of the second code-review fix pass) covering every orchestration control the brief
   lists — cycles/gates, approval blocking and invalidation, parallel-branch overlap and join, bounded
   repair and rollback with hash evidence, safe stop, resume/reconciliation without duplicate mutation,
   replanning invalidation, policy escape attempts, untrusted-text injection, and metric-formula
@@ -55,7 +55,7 @@ authentication, and the five roles sharing one adapter process.
 
 ## Validation performed
 
-- 71 coordinator unit/integration tests, all passing (55 from the original build, 16 added closing the code-review findings) (`docs/testing-report.md`).
+- 78 coordinator unit/integration tests, all passing (55 from the original build, 16 closing the first code-review pass, 7 closing the second) (`docs/testing-report.md`).
 - All three trusted test stages (A/B/C, 20+34+43 = 97 assertions worth of scenarios) passing against
   hand-written reference implementations, inside the real Docker isolation boundary.
 - Fixture-mode end-to-end runs for scenario A, scenario B (normal + labeled fault-injection recovery),

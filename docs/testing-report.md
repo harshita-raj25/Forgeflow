@@ -6,21 +6,23 @@
 .venv/bin/python -m pytest -q tests
 ```
 
-Result: **54 passed** (0 skipped, 0 failed), ~21s including real Docker container invocations.
+Result (current, after both code-review fix passes): **78 passed** (0 skipped, 0 failed), ~28s including
+real Docker container invocations. Per-file counts via `pytest --collect-only`:
 
 Breakdown:
-- `tests/test_graph.py` — 9 tests: topological order, cycle/unknown-dependency/duplicate-id/missing-gate
+- `tests/test_graph.py` — 10 tests: topological order, cycle/unknown-dependency/duplicate-id/missing-gate
   rejection, task-count limit, standard-graph gate wiring (with and without migration), empty-plan
   rejection, transitive-dependent computation.
-- `tests/test_policy.py` — 12 tests: path traversal/absolute-path/backslash/protected-root rejection
-  (parametrized), allowed-path acceptance, symlink escape, edit size/count limits, task-scope
-  enforcement, fixed-command allowlist, untrusted-text marker detection, credential-leak refusal in
+- `tests/test_policy.py` — 19 tests (parametrized cases counted individually): path traversal/absolute-
+  path/backslash/protected-root rejection, allowed-path acceptance, symlink escape, edit size/count
+  limits, task-scope enforcement (including the exact-filename-vs-sibling-file case closed in the first
+  code-review pass), fixed-command allowlist, untrusted-text marker detection, credential-leak refusal in
   `worker_env`.
 - `tests/test_store.py` — 5 tests: event chain verification and tamper detection, secret redaction in
   events, approval lifecycle and invalidation, idempotent-operation guard, node-attempt rerun lifecycle.
 - `tests/test_metrics.py` — 5 tests: zero-sample `N/A` handling, provider-retry vs code-repair counting,
   MTTR computation, human-wait-time exclusion/inclusion, rollback/unrecovered-incident tracking.
-- `tests/test_orchestration_e2e.py` — 15 tests, run against the real `Coordinator` + real Docker worker
+- `tests/test_orchestration_e2e.py` — 16 tests, run against the real `Coordinator` + real Docker worker
   with the deterministic `FixtureAdapter` (never a live model call, so still fully deterministic):
   greenfield success with overlapping parallel branches, complete/verified evidence export, pending
   approval blocking implementation, rejected approval failing the run, approval invalidation on a
@@ -28,8 +30,20 @@ Breakdown:
   fault injection with bounded repair and recovery, repair-budget exhaustion triggering rollback with
   hash evidence, safe stop preventing further dispatch, interrupted-attempt reconciliation on resume
   without duplicate mutation, idempotent export, untrusted-text injection attempt being flagged and
-  still blocked by policy, clarification pause before any code change, and a mid-flight requirement
-  revision invalidating downstream work/approvals and producing a genuinely different candidate hash.
+  still blocked by policy, clarification pause before any code change, a mid-flight requirement revision
+  invalidating downstream work/approvals and producing a genuinely different candidate hash, and (added
+  in the first code-review pass) an in-container probe asserting network/uid/socket/credential/read-only
+  isolation at runtime.
+- `tests/test_review_fixes.py` — 16 tests (first code-review pass): stale-write attempt discarding
+  without mutating the candidate, live/fixture adapter-mode mismatch refusal (both directions), the
+  `os._exit(0)` evaluator early-exit exploit and its rejection, concurrent-resume refusal and lease
+  ownership checks, validation-artifact hash integrity, CSRF/Origin rejection of an untrusted Host
+  (including a DNS-rebinding-style self-consistent attacker Host+Origin pair), bounded worker-output
+  collection, and exact-path-vs-sibling-file authorization.
+- `tests/test_review_fixes_2.py` — 7 tests (second code-review pass): zero-passed-assertion result
+  rejection (`no tests ran`, all-skipped), lease survival across an in-flight dispatch via a dedicated
+  heartbeat thread, real cross-process mutual exclusion between two separate `Coordinator` instances, and
+  Stop correctly blocking an in-flight implement write from landing.
 
 ## Trusted product tests (run inside the isolated Docker worker per candidate)
 

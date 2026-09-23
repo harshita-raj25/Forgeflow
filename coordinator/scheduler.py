@@ -5,6 +5,8 @@ replanning and safe stop. Models propose; this module validates and acts.
 from __future__ import annotations
 
 import ast
+import contextlib
+import fcntl
 import json
 import re
 import shutil
@@ -22,7 +24,7 @@ from .policy import PolicyViolation, scan_untrusted_text, validate_edits
 from .roles import files_block, load_schema, system_prompt, untrusted
 from .runner import DockerRunner, RunnerUnavailable, RunResult
 from .scenarios import Scenario, load_scenario
-from .store import TERMINAL_RUN, Store
+from .store import TERMINAL_RUN, LeaseError, Store
 from .util import canonical_json, iso, sha256_json, sha256_text, utcnow
 from .workspace import Workspace
 
@@ -34,10 +36,37 @@ INJECTED_FAULT_MARKER = "FORGEFLOW_INJECTED_FAULT"
 # absence from stdout on an exit-0 run is the signature of the process having been torn down before
 # pytest itself could report -- e.g. candidate code calling os._exit() during collection/import.
 _PYTEST_SUMMARY_RE = re.compile(r"\d+\s+(passed|failed|error|skipped|warning)|no tests (ran|collected)", re.IGNORECASE)
+_PYTEST_PASSED_RE = re.compile(r"(\d+)\s+passed", re.IGNORECASE)
+
+
+def _pytest_last_line(stdout: str) -> str:
+    """Pytest always prints its own one-line terminal summary strictly after all other output (warnings,
+    failure tracebacks, captured stdout from the candidate) -- it is the last non-blank line whenever
+    pytest completed normally. Checking only this line (third code review round, following up on finding
+    #1: the checker demonstrated that an unanchored search over the *whole* stdout blob is forgeable --
+    candidate code that triggers a warning whose message text itself looks like a summary line, e.g.
+    `warnings.warn("999 passed in 0.00s")`, leaked into pytest's own warnings-summary section and was
+    miscounted as a real 999 passed) closes that specific forgery. It does not defend against a candidate
+    using a background thread/atexit hook to print additional output to the same stream *after* pytest's
+    own process has finished printing but before the process actually exits -- that residual gap is the
+    same "evaluator shares a process with the candidate" limitation the fully separate-process evaluator
+    architecture (still out of scope; see docs/limitations.md) would close completely.
+    """
+    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
 
 
 def pytest_summary_present(stdout: str) -> bool:
-    return bool(_PYTEST_SUMMARY_RE.search(stdout or ""))
+    return bool(_PYTEST_SUMMARY_RE.search(_pytest_last_line(stdout)))
+
+
+def pytest_passed_count(stdout: str) -> int:
+    """Parse the number of passed tests from pytest's actual final summary line only (see
+    `_pytest_last_line`). Zero for "no tests ran", an all-skipped run, or a summary with no "N passed"
+    segment at all -- none of which may ever be accepted as evaluator evidence just because the exit code
+    was 0 and *some* matching text exists somewhere in the output."""
+    m = _PYTEST_PASSED_RE.search(_pytest_last_line(stdout))
+    return int(m.group(1)) if m else 0
 
 
 class NodeFailure(Exception):
@@ -70,6 +99,41 @@ class Coordinator:
             if lk is None:
                 lk = self._run_locks[run_id] = threading.Lock()
             return lk
+
+    @contextlib.contextmanager
+    def _promote_lock(self, run_id: str):
+        """The real mutual-exclusion authority around 'check freshness/stop, then write the candidate or
+        publish a graph revision'. `_run_lock` above is an in-process `threading.Lock` and does nothing
+        across two separate `Coordinator` instances -- the documented CLI creates a fresh one per
+        invocation, so two CLI processes racing an implement write against a `revise_requirement` call
+        were never actually ordered against each other (second code review, finding #3). `flock` is tied
+        to the open file description, so it provides real mutual exclusion both across processes and
+        across threads within one process holding separate file descriptors on the same path; the
+        in-process lock is kept as a fast, cheap inner layer, not the authority.
+        """
+        with self._run_lock(run_id):
+            lock_path = self.run_dir(run_id) / ".promote.lock"
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(lock_path, "w") as fh:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(fh, fcntl.LOCK_UN)
+
+    def _promotion_blocked(self, run_id: str, run_at_start: dict, req_at_start: dict, skip_graph_check: bool = False) -> str | None:
+        """Call only while holding `_promote_lock`. Returns a reason string if this attempt's output must
+        not be promoted (a requirement/graph revision landed, or the run was stopped, since dispatch
+        started), or None if it is safe to write. Folding the stop check in here (rather than only
+        `_stale`'s requirement/graph comparison) closes finding #4: Stop previously left an in-flight
+        implement/plan write unblocked because it never touches requirement_revision or graph_revision.
+        """
+        now = self.store.get_run(run_id)
+        if now["status"] == "STOPPED":
+            return "run was stopped before this attempt's output could be promoted"
+        if self._stale(run_id, run_at_start, req_at_start, skip_graph_check=skip_graph_check):
+            return "requirement or graph revision changed before this attempt's output could be promoted"
+        return None
 
     # ------------------------------------------------------------------ paths
     def run_dir(self, run_id: str) -> Path:
@@ -203,18 +267,29 @@ class Coordinator:
         if run["status"] in TERMINAL_RUN:
             return
         killed = self.runner.kill_all() if self.runner else []
-        latest = self.store.latest_attempts(run_id)
-        running = [t for t, a in latest.items() if a["status"] == "RUNNING"]
-        if running:
-            self.store.set_node_status(run_id, running, "CANCELLED", f"safe stop: {reason}", actor=actor)
-        self.store.update_run(run_id, stop_reason=reason)
-        self.store.set_status(run_id, "STOPPED", actor=actor, reason=reason, killed_workers=killed)
-        self.store.append_event(
-            run_id,
-            "safe_stop",
-            {"reason": reason, "killed_workers": killed, "baseline_hash": run["baseline_hash"], "candidate_hash": run["candidate_hash"]},
-            actor=actor,
-        )
+        # Take the same cross-process lock the promote step holds: whichever of "mark STOPPED" or "check
+        # freshness and write" gets there first is fully ordered against the other, so an in-flight
+        # implement/plan attempt can never write after this point without _promotion_blocked seeing
+        # status=STOPPED and refusing (second code review, finding #4). Without this, Stop only affected
+        # requirement/graph revisions, which an in-flight write's staleness check never looked at.
+        with self._promote_lock(run_id):
+            latest = self.store.latest_attempts(run_id)
+            running = [t for t, a in latest.items() if a["status"] == "RUNNING"]
+            if running:
+                self.store.set_node_status(run_id, running, "CANCELLED", f"safe stop: {reason}", actor=actor)
+            self.store.update_run(run_id, stop_reason=reason)
+            self.store.set_status(run_id, "STOPPED", actor=actor, reason=reason, killed_workers=killed)
+            self.store.append_event(
+                run_id,
+                "safe_stop",
+                {
+                    "reason": reason,
+                    "killed_workers": killed,
+                    "baseline_hash": run["baseline_hash"],
+                    "candidate_hash": run["candidate_hash"],
+                },
+                actor=actor,
+            )
 
     def _check_stop(self, run_id: str) -> None:
         ev = self._stop_flags.get(run_id)
@@ -249,12 +324,15 @@ class Coordinator:
     def _revise(self, run_id: str, text: str, reason: str, clarifications: list, actor: str) -> int:
         """Replanning semantics (PROJECT-SPEC §8): new revision, pause, invalidate affected + dependents, invalidate approvals.
 
-        Holds the same per-run lock a stale-sensitive node handler (implement, plan) holds around its
-        check-then-write: whichever side acquires the lock first is fully ordered relative to the other,
-        so a node's write and this revision's invalidation can never interleave in a way where the
-        recorded verdict (CANCELLED/stale) disagrees with what was actually written to disk.
+        Holds the same cross-process lock a stale-sensitive node handler (implement, plan) and stop() hold
+        around their check-then-act critical sections: whichever side acquires the lock first is fully
+        ordered relative to the others, so a node's write and this revision's invalidation can never
+        interleave in a way where the recorded verdict (CANCELLED/stale) disagrees with what was actually
+        written to disk -- across separate `Coordinator` instances (separate CLI/API processes), not only
+        within one (second code review, finding #3: an in-process `threading.Lock` here previously did
+        nothing to order a revision committed from a different process against an in-flight write).
         """
-        with self._run_lock(run_id), self.store.conn():
+        with self._promote_lock(run_id), self.store.conn():
             rev = self.store.add_requirement_revision(run_id, text, reason, clarifications, actor=actor)
             g = TaskGraph.from_dict(self.store.get_graph(run_id)["graph"])
             affected = g.affected_by_inputs({"requirement"})
@@ -324,6 +402,9 @@ class Coordinator:
             self.store.acquire_lease(run_id, self.owner)
             with self._lock:
                 self._stop_flags.setdefault(run_id, threading.Event()).clear()
+            heartbeat_stop = threading.Event()
+            heartbeat = threading.Thread(target=self._lease_heartbeat, args=(run_id, heartbeat_stop), daemon=True)
+            heartbeat.start()
             try:
                 self._reconcile(run_id)
                 run = self.store.get_run(run_id)
@@ -337,11 +418,29 @@ class Coordinator:
             except StopRequested:
                 pass
             finally:
+                heartbeat_stop.set()
+                heartbeat.join(timeout=5)
                 self.store.release_lease(run_id, self.owner)
             return self.store.get_run(run_id)
         finally:
             with self._lock:
                 self._active_runs.discard(run_id)
+
+    def _lease_heartbeat(self, run_id: str, stop: threading.Event, ttl_s: float = 60.0, interval_s: float = 15.0) -> None:
+        """Renew the persisted lease on a fixed cadence for as long as resume() is executing, independent
+        of any single node's completion. The dispatch loop's own per-iteration renewal only fires between
+        node dispatches; a single node blocking longer than the lease TTL (a live model call with retries
+        can exceed it) would otherwise let the lease lapse while a scheduler is still genuinely active
+        (second code review, finding #2). This thread is the actual renewal authority; the loop's call is
+        a harmless no-op fast-path renewal on top of it.
+        """
+        while not stop.wait(interval_s):
+            try:
+                self.store.acquire_lease(run_id, self.owner, ttl_s=ttl_s)
+            except LeaseError:
+                # Someone else's lease already won (e.g. this process's own lease genuinely expired and
+                # was reclaimed) -- stop trying; the run loop's own status checks will notice and unwind.
+                return
 
     def _wait_resolved(self, run_id: str, run: dict) -> bool:
         if run["status"] == "WAITING_FOR_INPUT":
@@ -715,15 +814,14 @@ class Coordinator:
         rel = f"plan-r{req['revision']}.json"
         _, h = ws.write_artifact(rel, json.dumps(plan, indent=2))
         art = self.store.add_artifact(run_id, "plan", f"artifacts/{rel}", h, aid, [], req["revision"], None)
-        # Same promote-or-discard discipline as implement (finding #1): a graph revision this plan attempt
-        # is about to publish must not land after a concurrent requirement revision already moved on.
-        with self._run_lock(run_id):
-            if self.store.get_run(run_id)["requirement_revision"] != req["revision"]:
-                raise NodeFailure(
-                    "stale",
-                    "requirement changed before this plan could be published; discarding without publishing a graph revision",
-                    repairable=False,
-                )
+        # Same promote-or-discard discipline as implement: a graph revision this plan attempt is about to
+        # publish must not land after a concurrent requirement revision already moved on, a concurrent
+        # revise() from ANY process, or a Stop -- enforced by the cross-process lock, not just an
+        # in-process one (second code review, findings #3 and #4).
+        with self._promote_lock(run_id):
+            blocked = self._promotion_blocked(run_id, run, req, skip_graph_check=True)
+            if blocked:
+                raise NodeFailure("stale", f"{blocked}; discarding without publishing a graph revision", repairable=False)
             prev = self.store.get_graph(run_id)
             old = TaskGraph.from_dict(prev["graph"])
             diff = diff_graphs(old, graph)
@@ -762,15 +860,16 @@ class Coordinator:
             )
         resp = self._call_model(run_id, "implementer", node.task_id, "\n\n".join(parts), aid, revision=run["candidate_revision"] + 1)
         edits = validate_edits(resp.data["edits"], self.settings.budget, node.allowed_paths)
-        # Promote-or-discard atomically with any concurrent replan: hold the same per-run lock _revise()
-        # holds, and recheck freshness under it immediately before writing. If a revision landed between
-        # this attempt's dispatch and now, the write never happens -- the eventual CANCELLED/stale verdict
-        # then actually matches what's on disk, closing the race the code review flagged (finding #1).
-        with self._run_lock(run_id):
-            if self._stale(run_id, run, req):
-                raise NodeFailure(
-                    "stale", "requirement or graph changed before edits could be promoted; discarding without writing", repairable=False
-                )
+        # Promote-or-discard atomically with any concurrent replan or Stop: hold the same cross-process
+        # lock _revise() and stop() hold, and recheck freshness (including run status) under it
+        # immediately before writing. If a revision landed, or the run was stopped, between this attempt's
+        # dispatch and now, the write never happens -- the eventual CANCELLED/stale verdict then actually
+        # matches what's on disk, in-process AND across separate CLI/API processes (both code review
+        # findings #3 and #4 covered by the same mechanism).
+        with self._promote_lock(run_id):
+            blocked = self._promotion_blocked(run_id, run, req)
+            if blocked:
+                raise NodeFailure("stale", f"{blocked}; discarding without writing", repairable=False)
             pre_hash = ws.candidate_hash()
             records = ws.apply_edits(edits)
             post_hash = ws.candidate_hash()
@@ -885,17 +984,33 @@ class Coordinator:
                 extra_env=extra_env,
             )
             if name == "test" and r.exit_code == 0 and not pytest_summary_present(r.stdout):
-                # Finding #3: exit code 0 alone is not proof the evaluator ran to completion. Candidate
-                # code that terminates the pytest process during collection/import (e.g. os._exit(0))
-                # produces exit 0 with no pytest summary line at all -- indistinguishable from a real pass
-                # by exit code alone. A genuine pytest run always prints a summary line, even for zero
-                # collected tests ("no tests ran"). Treat its absence as a failure regardless of exit code.
+                # Finding #3 (first review): exit code 0 alone is not proof the evaluator ran to
+                # completion. Candidate code that terminates the pytest process during collection/import
+                # (e.g. os._exit(0)) produces exit 0 with no pytest summary line at all -- indistinguishable
+                # from a real pass by exit code alone. A genuine pytest run always prints a summary line,
+                # even for zero collected tests ("no tests ran"). Treat its absence as a failure.
                 r = replace(
                     r,
                     exit_code=1,
                     stderr=r.stderr + "\n[forgeflow] REJECTED: test exit code was 0 but no pytest summary line was found in "
                     "stdout; the evaluator process likely terminated before completing (e.g. os._exit in "
                     "candidate code during import). Treating as failed.",
+                )
+            elif name == "test" and r.exit_code == 0 and pytest_passed_count(r.stdout) < 1:
+                # Finding #1 (second review): a summary line existing is not the same as tests having
+                # actually run. "no tests ran in 0.00s" and "43 skipped in 0.01s" both have a well-formed
+                # summary line and exit 0, yet zero assertions executed -- both were reproduced as accepted
+                # by the prior check alone. The trusted suite always has at least one unconditionally-run
+                # (never-skipped) test for whichever stage is active, so a real pass always reports at
+                # least one "passed"; its absence is treated as a failure regardless of exit code or the
+                # presence of some other summary text.
+                r = replace(
+                    r,
+                    exit_code=1,
+                    stderr=r.stderr + "\n[forgeflow] REJECTED: test exit code was 0 and a pytest summary line was present, "
+                    'but it reports zero passed tests (e.g. "no tests ran" or an all-skipped run). The '
+                    "trusted suite always has at least one unconditionally-run test; zero passed is never "
+                    "a genuine acceptance result. Treating as failed.",
                 )
             results[name] = r
             # Finding #5: hash the exact bytes written, not a separately (differently) serialized copy.
