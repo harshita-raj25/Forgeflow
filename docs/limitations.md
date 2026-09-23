@@ -50,6 +50,31 @@ required controls; it does not claim enterprise production readiness.
   check-then-act at the lock boundary, not true interruption of an in-progress filesystem write once that
   write's own critical section has already begun).
 
+## Test-completion trust boundary (residual gap, disclosed and deferred)
+- `_pytest_last_line()` (`coordinator/scheduler.py`) parses only pytest's actual final summary line, not
+  the whole stdout blob, closing the forgery an independent checker demonstrated: a candidate-triggered
+  `warnings.warn("999 passed in 0.00s")` leaking a fake count out of pytest's own warnings-summary
+  section. That checker then found a further, deeper bypass of the same general kind: candidate code that
+  registers `atexit.register(lambda: print("999 passed in 0.00s"))` at import time prints *after*
+  pytest's own genuine summary line but *before* the worker process exits, becoming the new last line and
+  forging an accepted pass on a genuinely all-failing or zero-assertion run. This was verified empirically
+  against the real, unmodified `_node_validate` handler.
+- This is not fixed in code. The evaluator (pytest) and the generated candidate application currently
+  share one process, so a candidate can always attempt to control what that process prints after pytest
+  itself is done, no matter how the summary line is parsed. The only fix that closes this class of attack
+  completely is running acceptance assertions in a process genuinely separate from the candidate — the
+  same "fully separate supervised evaluator process" architecture the original code review suggested and
+  every fix pass in this repository has explicitly kept out of scope as a larger architectural change.
+  A cheaper partial mitigation exists (skip Python's own `atexit` machinery by having the worker's pytest
+  invocation exit via `os._exit(pytest.main(...))` instead of a normal interpreter shutdown) but was not
+  implemented in T-003; it remains a candidate for a future, explicitly scoped fix pass.
+- Net position: the test-completion trust boundary is a genuinely bounded prototype control, not a
+  complete one. It defends against the specific reproduced attacks (silent early exit, a bare zero-test
+  or all-skipped result, and warning-message forgery mid-stream) but not against a sufficiently determined
+  candidate willing to hook process-exit machinery. Treat any "validation passed" result from this system
+  as strong but not airtight evidence, and do not rely on it alone for a genuinely adversarial candidate
+  source in a higher-stakes deployment than this local prototype.
+
 ## Model variability and budgets
 - Live model calls are bounded (90s timeout, ≤2 retries, ≤1 structured-output correction, ≤2 code-repair
   cycles, ≤30 provider calls and ≤20 minutes active execution per run). A model that produces working code
