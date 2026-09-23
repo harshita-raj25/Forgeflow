@@ -3,6 +3,39 @@
 This is a bounded local prototype built in one day. It demonstrates governed orchestration and the
 required controls; it does not claim enterprise production readiness.
 
+## Two unresolved architectural gaps (stated plainly, not incrementally narrowed)
+
+Four rounds of adversarial code review converged on two design-level gaps that remain open. Each round's
+fix closed the *specific reproduced case* without closing the *underlying design problem*, and that
+pattern is stated here explicitly rather than left to be inferred from a trail of narrower and narrower
+fixes:
+
+1. **The test evaluator shares a process with the generated candidate.** Every fix so far (rejecting
+   empty output, requiring a real summary line, requiring a non-zero passed count, requiring at least the
+   stage's known minimum passed count) narrows what a candidate can get away with, but none of them
+   change the fact that pytest and the candidate's own code run in the same process and share the same
+   output stream. A sufficiently motivated candidate can still influence what that process ultimately
+   prints. The only fix that removes this boundary is running the trusted evaluator in a process genuinely
+   separate from the candidate, with its own completion record the candidate cannot touch. That has not
+   been implemented. Do not read the current `MIN_EXPECTED_PASSED` threshold as having closed this; it has
+   not, and no further regex or count threshold in this same process will close it either.
+2. **Lease ownership can change between the ownership check and the filesystem write.** The promote-lock
+   fix in T-004 correctly blocks a stale scheduler whose lease had *already* transferred before it re-
+   checked ownership. A fourth review found a narrower window inside that same fix: a scheduler can pass
+   its ownership check, then lose its lease to a takeover *while still holding the publication lock and
+   before finishing its write*, and that write still lands and reports success under the new owner's
+   lease. The file lock only orders writers against each other; it does not make "check ownership" and
+   "write" a single atomic step against a concurrent lease transfer. Closing this needs either an
+   immutable staged snapshot with a transactional accepted-pointer update conditioned on owner/generation/
+   lease-validity/revision together, or a lock that lease transfer itself must also acquire, consistently
+   ordered with publication. Neither has been implemented.
+
+Both are genuine, reproducible gaps in a governance system whose whole purpose is enforcing exactly these
+guarantees. They are disclosed here as open, not as "mostly closed" or "narrowed to an edge case." Treat
+every validation result and every publish-under-lease event this prototype produces as good evidence of
+normal operation, not as a machine-checked proof against an adversarial candidate or a genuinely
+adversarial multi-scheduler deployment.
+
 ## Local identity and authentication
 - There is no authentication. Approvals and clarifications carry a configurable local human label
   (`FORGEFLOW_HUMAN`, default `owner`) recorded on every decision — this is an audit label, not an

@@ -3,10 +3,17 @@
 A local, reviewable agentic software-engineering workbench. Its runtime agents generate and evolve a URL
 shortener through an explicit dependency graph with durable state, human approval gates, real isolated
 tool execution, bounded recovery, and dynamic replanning. See [`docs/architecture.md`](docs/architecture.md)
-for the design and [`docs/limitations.md`](docs/limitations.md) for what this prototype does not claim.
+for the design and [`docs/limitations.md`](docs/limitations.md) for what this prototype does not claim —
+**read that file's "Two unresolved architectural gaps" section first**; two real, adversarially-found
+issues (evaluator process isolation, lease-ownership atomicity) remain open by explicit decision, not
+oversight.
 
-Read [`PROJECT-SPEC.md`](PROJECT-SPEC.md) and [`BUILD-AND-DEMO.md`](BUILD-AND-DEMO.md) for the full brief
-this implements.
+**Start here for a submission review:** [`SUBMISSION.md`](SUBMISSION.md) maps every deliverable the
+assignment requires to its doc. [`docs/final-engineering-summary.md`](docs/final-engineering-summary.md)
+is the accurate, current-state summary.
+
+Read [`PROJECT-SPEC.md`](PROJECT-SPEC.md) and [`BUILD-AND-DEMO.md`](BUILD-AND-DEMO.md) for the original
+implementation brief.
 
 ## Prerequisites
 
@@ -91,7 +98,7 @@ live provider call stops the run for human intervention (`AdapterError`), it is 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q tests   # coordinator unit + orchestration tests (needs Docker); 78 tests (55 from the original build + 16 from the first code-review fix pass + 7 from the second)
+.venv/bin/python -m pytest -q tests   # coordinator unit + orchestration tests (needs Docker); 86 tests across four fix passes responding to four external review rounds
 ```
 
 In normal operation the trusted tests run **inside the worker container** against each candidate

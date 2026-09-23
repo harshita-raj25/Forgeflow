@@ -101,14 +101,30 @@ checkpoint-and-stop behavior already demonstrated in Attempt 2 above. No further
 this point: neither T-001 nor T-002 depends on regenerating this specific evidence (T-002's checker
 explicitly scoped it out), and repeated live attempts have a real dollar and time cost.
 
+## Attempts 7–8 (post T-004, submission evidence pass) — two more genuine provider stops
+
+Two further isolated attempts (`run_ttqh8qfum4jb`, `run_r75xwrmgic3m`) were made specifically to produce a
+fresh, locally-intact live evidence bundle for submission. Both got through `plan_approval` with real
+model output. The first hit a genuine transient provider error at `t1` after the configured retries; the
+second got further — `t1` succeeded with 249 lines of real live-generated code (preserved at
+`runs/run_r75xwrmgic3m/candidate/app/main.py`) — then hit the same class of genuine transient provider
+error at `t2`. Both stopped correctly rather than substituting anything. Combined with the three prior
+attempts in this session that hit the identical failure mode, this is a consistent pattern of OpenAI
+provider instability during this session's timeframe, not a coordinator defect. Per explicit direction to
+stop open-ended cycles, no further live attempts were made after these two.
+
 **Net honest position on live evidence:** a complete, independently-checker-verified successful live
 end-to-end run genuinely happened once (Attempt 3, `run_y5bhsca8tqau`) — every role's model call was real,
 a real live-generated bug was caught by trusted tests and genuinely repaired, and the exported service
 was launched and exercised over real HTTP. That bundle's specific files no longer exist locally because
 of two of my own `rm` mistakes (disclosed above), not because the run didn't happen; the checker
 inspected the authoritative database directly before it was lost the second time and confirmed
-`status=SUCCEEDED` with 118 verified events. Reproducing it again is mechanical (see below) but was not
-completed a second time due to provider instability encountered on four further attempts.
+`status=SUCCEEDED` with 118 verified events. Five further attempts across two sessions to regenerate an
+equivalent locally-intact bundle all hit genuine transient OpenAI provider errors rather than completing
+or revealing a coordinator defect; the pattern is real and disclosed here rather than retried indefinitely.
+The strongest current locally-available live artifact is `runs/run_r75xwrmgic3m/` — a real, live-generated
+`app/main.py` from a successful implementation call, stopped safely afterward at a downstream provider
+error, not a complete successful bundle.
 
 ## Reproducing
 
