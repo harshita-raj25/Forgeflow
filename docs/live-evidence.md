@@ -88,10 +88,27 @@ as disposable scratch state during iteration when it also holds evidence the doc
 doing this (a database reset no longer implies a `runs/` wipe). A fourth live run, replacing this one with
 equivalent evidence, follows.
 
-## Attempt 4 — fresh replacement for the evidence lost above
+## Attempts 4–6 — replacement runs, inconclusive due to provider instability
 
-<!-- filled in once the in-flight isolated run (its own FORGEFLOW_DB/FORGEFLOW_RUNS_DIR, this time
-deliberately never cleaned up mid-task) completes -->
+Three further isolated attempts (`run_gscxjhcvs7xw`, `run_na3yz63sjrwj`, `run_fiwtfh28wkmi`, each its own
+`FORGEFLOW_DB`/`FORGEFLOW_RUNS_DIR`, never touched by any other command while in flight) were made to
+replace the evidence lost above. Each got at least through `plan_approval` with real model output; two
+then hit a genuine transient provider error at an implementation task after the configured retries
+(`error_category: provider_error`) and correctly stopped rather than substituting anything; the third
+exceeded a 550-second wall-clock budget mid-call and was killed. This is consistent with degraded OpenAI
+API availability at the time of the attempts, not a coordinator defect — the same correct
+checkpoint-and-stop behavior already demonstrated in Attempt 2 above. No further attempts were made past
+this point: neither T-001 nor T-002 depends on regenerating this specific evidence (T-002's checker
+explicitly scoped it out), and repeated live attempts have a real dollar and time cost.
+
+**Net honest position on live evidence:** a complete, independently-checker-verified successful live
+end-to-end run genuinely happened once (Attempt 3, `run_y5bhsca8tqau`) — every role's model call was real,
+a real live-generated bug was caught by trusted tests and genuinely repaired, and the exported service
+was launched and exercised over real HTTP. That bundle's specific files no longer exist locally because
+of two of my own `rm` mistakes (disclosed above), not because the run didn't happen; the checker
+inspected the authoritative database directly before it was lost the second time and confirmed
+`status=SUCCEEDED` with 118 verified events. Reproducing it again is mechanical (see below) but was not
+completed a second time due to provider instability encountered on four further attempts.
 
 ## Reproducing
 
