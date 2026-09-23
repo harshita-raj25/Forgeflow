@@ -69,6 +69,21 @@ def pytest_passed_count(stdout: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+# Minimum passed-test count the trusted suite is known to report for each stage when genuinely run to
+# completion (third code review round, P1 finding #1: `pytest_passed_count() >= 1` alone accepted
+# `1 passed, 42 skipped in 0.01s` -- a candidate that suppresses nearly the entire suite via a conftest
+# hack, markers, or environment tampering, leaving only one trivial test passing, still reported a
+# well-formed, non-zero, non-empty result). Requiring at least this many closes that specific bypass for
+# the trusted suite as it exists today. This is an explicit, disclosed trade-off (kept in sync with
+# `trusted_tests/` here in one place; see docs/limitations.md), not a substitute for a fully separate
+# evaluator process, which remains the only complete fix and stays out of scope.
+MIN_EXPECTED_PASSED = {"A": 20, "B": 34, "C": 43}
+
+
+def min_expected_passed(stage: str) -> int:
+    return MIN_EXPECTED_PASSED.get(stage, 1)
+
+
 class NodeFailure(Exception):
     def __init__(self, category: str, message: str, repairable: bool = False, payload: dict | None = None):
         super().__init__(message)
@@ -123,12 +138,30 @@ class Coordinator:
 
     def _promotion_blocked(self, run_id: str, run_at_start: dict, req_at_start: dict, skip_graph_check: bool = False) -> str | None:
         """Call only while holding `_promote_lock`. Returns a reason string if this attempt's output must
-        not be promoted (a requirement/graph revision landed, or the run was stopped, since dispatch
-        started), or None if it is safe to write. Folding the stop check in here (rather than only
-        `_stale`'s requirement/graph comparison) closes finding #4: Stop previously left an in-flight
-        implement/plan write unblocked because it never touches requirement_revision or graph_revision.
+        not be promoted (ownership moved to another scheduler, a requirement/graph revision landed, or the
+        run was stopped, since dispatch started), or None if it is safe to write. Folding the stop check
+        in here (rather than only `_stale`'s requirement/graph comparison) closes finding #4: Stop
+        previously left an in-flight implement/plan write unblocked because it never touches
+        requirement_revision or graph_revision.
+
+        The ownership check (third code review round, P1 finding #2) closes a distinct gap: the
+        cross-process file lock only ever serializes writers against each other, it does not say which
+        writer is *entitled* to write. If this scheduler's lease expired while a model call was genuinely
+        still in flight (the process itself stalled, not just a single call -- the heartbeat thread lives
+        in the same process and cannot renew if the whole process is paused/frozen), another scheduler can
+        legitimately take over, reconcile the orphaned attempt, and complete the same node as a fresh
+        attempt under its own ownership. When the first scheduler's stale response then arrives, neither
+        the requirement/graph revision nor the run status need have changed for that takeover to have
+        happened -- so only checking those, as before, would let the stale scheduler publish anyway. A
+        promote is only ever legitimate while the promoting `Coordinator` instance still holds the lease
+        it acquired before dispatch (each instance holds one fixed random owner id for its process
+        lifetime, held continuously for the duration of `resume()`), so comparing the persisted
+        `lease_owner` against `self.owner` under the same lock that serializes the write is sufficient and
+        needs no separate generation counter.
         """
         now = self.store.get_run(run_id)
+        if now["lease_owner"] != self.owner:
+            return f"this scheduler ({self.owner}) is no longer the current lease holder (now {now['lease_owner']!r}); refusing to promote a write made under a lease that has since moved to another scheduler"
         if now["status"] == "STOPPED":
             return "run was stopped before this attempt's output could be promoted"
         if self._stale(run_id, run_at_start, req_at_start, skip_graph_check=skip_graph_check):
@@ -996,20 +1029,22 @@ class Coordinator:
                     "stdout; the evaluator process likely terminated before completing (e.g. os._exit in "
                     "candidate code during import). Treating as failed.",
                 )
-            elif name == "test" and r.exit_code == 0 and pytest_passed_count(r.stdout) < 1:
-                # Finding #1 (second review): a summary line existing is not the same as tests having
-                # actually run. "no tests ran in 0.00s" and "43 skipped in 0.01s" both have a well-formed
-                # summary line and exit 0, yet zero assertions executed -- both were reproduced as accepted
-                # by the prior check alone. The trusted suite always has at least one unconditionally-run
-                # (never-skipped) test for whichever stage is active, so a real pass always reports at
-                # least one "passed"; its absence is treated as a failure regardless of exit code or the
-                # presence of some other summary text.
+            elif name == "test" and r.exit_code == 0 and pytest_passed_count(r.stdout) < min_expected_passed(sc.stage):
+                # Finding #1 (second review, strengthened in the third): a summary line existing is not
+                # the same as the *expected* tests having actually run. "no tests ran in 0.00s" and
+                # "43 skipped in 0.01s" both have a well-formed summary line and exit 0 with zero
+                # assertions executed; a later round showed "1 passed, 42 skipped in 0.01s" also slipped
+                # past a bare ">=1 passed" check even though the real suite for this stage reports dozens
+                # passed when genuinely run. Requiring at least the trusted suite's known minimum for the
+                # active stage (`MIN_EXPECTED_PASSED`) closes that specific class of under-execution.
+                got = pytest_passed_count(r.stdout)
+                want = min_expected_passed(sc.stage)
                 r = replace(
                     r,
                     exit_code=1,
-                    stderr=r.stderr + "\n[forgeflow] REJECTED: test exit code was 0 and a pytest summary line was present, "
-                    'but it reports zero passed tests (e.g. "no tests ran" or an all-skipped run). The '
-                    "trusted suite always has at least one unconditionally-run test; zero passed is never "
+                    stderr=r.stderr + f"\n[forgeflow] REJECTED: test exit code was 0 and reported {got} passed, but stage "
+                    f"{sc.stage} is known to report at least {want} when genuinely run to completion. A "
+                    "suspiciously low passed count (e.g. most of the suite skipped or suppressed) is never "
                     "a genuine acceptance result. Treating as failed.",
                 )
             results[name] = r

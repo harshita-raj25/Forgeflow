@@ -74,6 +74,16 @@ required controls; it does not claim enterprise production readiness.
   candidate willing to hook process-exit machinery. Treat any "validation passed" result from this system
   as strong but not airtight evidence, and do not rely on it alone for a genuinely adversarial candidate
   source in a higher-stakes deployment than this local prototype.
+- **Minimum expected passed-test count (T-004, third code review round).** A third review found that
+  `pytest_passed_count() >= 1` alone still accepted `1 passed, 42 skipped in 0.01s` — a candidate that
+  suppresses nearly the entire trusted suite (via a conftest hack, markers, or environment tampering)
+  while leaving one trivial test passing. `coordinator/scheduler.py::MIN_EXPECTED_PASSED` now requires at
+  least the trusted suite's known minimum passed count for the active stage (20/34/43 for A/B/C) instead
+  of a bare non-zero count. This is a hardcoded, disclosed trade-off: it must be kept in sync by hand if
+  `trusted_tests/` grows or shrinks, and it still does not establish that the *specific expected* tests
+  ran versus some other combination totalling the same count — it raises the bar substantially without
+  being the complete fix. As with every other version of this gap, only a fully separate evaluator process
+  closes it completely, and that remains out of scope.
 
 ## Model variability and budgets
 - Live model calls are bounded (90s timeout, ≤2 retries, ≤1 structured-output correction, ≤2 code-repair

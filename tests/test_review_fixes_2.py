@@ -171,6 +171,10 @@ def test_cross_process_lock_provides_real_mutual_exclusion(tmp_path, monkeypatch
     def a_holds_the_lock():
         req = coord_a.store.get_requirement(rid)
         run = coord_a.store.get_run(rid)
+        # _promotion_blocked (third review round) now also checks lease ownership; a promote is only
+        # ever legitimate while the calling instance actually holds the lease, so acquire it here to
+        # match how this critical section is really only ever entered from within an active resume().
+        coord_a.store.acquire_lease(rid, coord_a.owner)
         with coord_a._promote_lock(rid):
             order.append("a-acquired")
             a_in_critical_section.set()
