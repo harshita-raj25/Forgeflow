@@ -110,9 +110,7 @@ sharing one adapter process; POSIX (`fcntl`) for the cross-process lock, no Wind
 - Four independent checkers (clean context, no access to the builder's reasoning), each re-running tests,
   constructing their own adversarial reproductions — including genuinely separate OS processes, not just
   threads — and in two cases finding real bypasses in the prior fix that were then disclosed and
-  addressed rather than hidden. See `docs/final-report.md`, `docs/final-report-T002.md`,
-  `docs/final-report-T003.md`, `docs/final-report-T004.md` for the full criterion-by-criterion record of
-  each round.
+  addressed rather than hidden.
 
 ## Risks and trade-offs
 

@@ -12,3 +12,8 @@ runs/
 *.db-wal
 *.db-shm
 .eaos/
+.eaos-spec*.md
+docs/final-report*.md
+/PROJECT-SPEC.md
+/BUILD-AND-DEMO.md
+/START-HERE.md

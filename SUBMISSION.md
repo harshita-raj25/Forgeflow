@@ -56,12 +56,10 @@ submission.
 
 ## Review history (for context, not required reading)
 
-Four rounds of external adversarial code review shaped this prototype. Each round's findings and the
-independently-checker-verified fixes are recorded in `docs/final-report.md`,
-`docs/final-report-T002.md`, `docs/final-report-T003.md`, `docs/final-report-T004.md`. The pattern across
-rounds — each fix closing the specific reproduced case without closing the underlying design problem for
-the two hardest findings — is what `docs/limitations.md`'s top section states directly, instead of leaving
-a reader to reconstruct it from four separate review documents.
+Four rounds of external adversarial code review shaped this prototype. The pattern across rounds — each fix
+closing the specific reproduced case without closing the underlying design problem for the two hardest
+findings — is what `docs/limitations.md`'s top section and `docs/final-engineering-summary.md` state
+directly.
 
 ## How to read this submission honestly
 

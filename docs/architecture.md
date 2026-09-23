@@ -20,6 +20,53 @@ workspace) are strictly separate. Generated code can only write under `app/` and
 disposable workspace; it can never see or edit `coordinator/`, `trusted_tests/`, `prompts/`, `schemas/`, or
 another run's files. See `coordinator/policy.py`.
 
+## Orchestration graph
+
+Gates (diamonds) are inserted by the coordinator (`coordinator/graph.py::build_standard_graph`), not
+proposed by the model — a plan cannot remove one by omitting it. `migration_approval` only exists on the
+branch when the plan itself declares `migration.required=true`.
+
+```mermaid
+flowchart TD
+    intake[intake]
+    baseline[baseline_analysis<br/><i>brownfield only</i>]
+    requirements[requirements]
+    plan[plan]
+    plan_approval{{plan_approval<br/>human gate}}
+    migration_approval{{migration_approval<br/>human gate — only if migration required}}
+    t1[t1 implement]
+    t2[t2 implement]
+    t3[t3 implement]
+    freeze[freeze<br/>manifest hash]
+    validate[validate<br/>lint + trusted tests<br/>in isolated Docker runner]
+    review[review<br/>security / policy]
+    docs[docs]
+    join{{join<br/>same candidate hash required}}
+    release_approval{{release_approval<br/>human gate}}
+    export[export<br/>evidence bundle]
+
+    intake --> requirements
+    intake --> baseline
+    baseline --> plan
+    requirements --> plan
+    plan --> plan_approval
+    plan_approval -.no migration.-> t1
+    plan_approval -.migration required.-> migration_approval
+    migration_approval --> t1
+    t1 --> t2
+    t1 --> t3
+    t2 --> freeze
+    t3 --> freeze
+    freeze --> validate
+    freeze --> review
+    freeze --> docs
+    validate --> join
+    review --> join
+    docs --> join
+    join --> release_approval
+    release_approval --> export
+```
+
 ## Control flow
 
 ```
@@ -52,9 +99,54 @@ plan — the gates are inserted by the coordinator, not proposed by the model.
 Run statuses: `PENDING, RUNNING, WAITING_FOR_INPUT, WAITING_FOR_APPROVAL, SUCCEEDED, FAILED, STOPPED`.
 Node statuses: `PENDING, RUNNING, SUCCEEDED, FAILED, BLOCKED, INVALIDATED, CANCELLED, INTERRUPTED`.
 
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RUNNING: resume()
+    RUNNING --> WAITING_FOR_APPROVAL: gate node reached
+    RUNNING --> WAITING_FOR_INPUT: clarification needed
+    WAITING_FOR_APPROVAL --> RUNNING: approve() / reject()
+    WAITING_FOR_INPUT --> RUNNING: clarify()
+    RUNNING --> SUCCEEDED: export completes
+    RUNNING --> FAILED: repair budget exhausted, or approval rejected
+    RUNNING --> STOPPED: stop()
+    PENDING --> STOPPED: stop()
+    WAITING_FOR_APPROVAL --> STOPPED: stop()
+    WAITING_FOR_INPUT --> STOPPED: stop()
+    SUCCEEDED --> [*]
+    FAILED --> [*]
+    STOPPED --> [*]
+```
+
 A single scheduler owns a run via a leased row (`lease_owner`, `lease_expires`); `resume` first
 reconciles any attempt still `RUNNING` (from a scheduler that died) to `INTERRUPTED`, preserving all
 already-succeeded artifacts. `export` is idempotent per candidate hash via the `operations` table.
+
+## Failure recovery and replanning decision flow
+
+Two independent decision paths: bounded repair on a failed node (left), and the invalidation cascade on a
+mid-flight requirement revision (right, detailed in "Replanning" below).
+
+```mermaid
+flowchart TD
+    A[implement / validate node fails] --> B{repair cycles<br/>used < 2?}
+    B -- yes --> C[repair_started:<br/>re-invoke implementer with<br/>failing output as context]
+    C --> D{validate passes<br/>on the new candidate?}
+    D -- yes --> E[continue pipeline]
+    D -- no --> B
+    B -- no, budget exhausted --> F[rollback to last<br/>verified snapshot]
+    F --> G[run FAILED<br/>pre/post hash + failure evidence preserved]
+
+    H[requirement revision submitted] --> I[new immutable<br/>requirement_revisions row]
+    I --> J["affected_by_inputs({'requirement'})<br/>+ transitive dependents"]
+    J --> K[RUNNING affected nodes → CANCELLED]
+    J --> L[completed/failed affected attempts<br/>→ INVALIDATED, even prior SUCCEEDED]
+    J --> M[pending/approved approvals<br/>→ invalidated with reason]
+    K --> N[resume: invalidated nodes<br/>are re-dispatched]
+    L --> N
+    M --> N
+    N --> O[new graph revision published,<br/>diffed against prior<br/>fresh plan_approval required]
+```
 
 ## Replanning (`Coordinator._revise`)
 

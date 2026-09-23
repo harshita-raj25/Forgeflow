@@ -12,8 +12,106 @@ oversight.
 assignment requires to its doc. [`docs/final-engineering-summary.md`](docs/final-engineering-summary.md)
 is the accurate, current-state summary.
 
-Read [`PROJECT-SPEC.md`](PROJECT-SPEC.md) and [`BUILD-AND-DEMO.md`](BUILD-AND-DEMO.md) for the original
-implementation brief.
+## Architecture at a glance
+
+Full breakdown (components, state model, policy engine, adapters, isolated runner): see
+[`docs/architecture.md`](docs/architecture.md).
+
+### Orchestration graph
+
+Gates (diamond nodes) are inserted by the coordinator, not proposed by the model — a plan cannot omit
+them. `migration_approval` only exists on the branch when the plan itself declares a migration.
+Implementation tasks (`t1..tN`) are whatever DAG the *approved* plan defines; two independent tasks are
+shown running in parallel here because that is what the scheduler actually does when their dependencies
+allow it.
+
+```mermaid
+flowchart TD
+    intake[intake]
+    baseline[baseline_analysis<br/><i>brownfield only</i>]
+    requirements[requirements]
+    plan[plan]
+    plan_approval{{plan_approval<br/>human gate}}
+    migration_approval{{migration_approval<br/>human gate — only if plan.migration.required}}
+    t1[t1 implement]
+    t2[t2 implement]
+    t3[t3 implement]
+    freeze[freeze<br/>manifest hash]
+    validate[validate<br/>lint + trusted tests<br/>in isolated Docker runner]
+    review[review<br/>security / policy]
+    docs[docs]
+    join{{join<br/>same candidate hash required}}
+    release_approval{{release_approval<br/>human gate}}
+    export[export<br/>evidence bundle]
+
+    intake --> requirements
+    intake --> baseline
+    baseline --> plan
+    requirements --> plan
+    plan --> plan_approval
+    plan_approval -.no migration.-> t1
+    plan_approval -.migration required.-> migration_approval
+    migration_approval --> t1
+    t1 --> t2
+    t1 --> t3
+    t2 --> freeze
+    t3 --> freeze
+    freeze --> validate
+    freeze --> review
+    freeze --> docs
+    validate --> join
+    review --> join
+    docs --> join
+    join --> release_approval
+    release_approval --> export
+```
+
+### Run lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RUNNING: resume()
+    RUNNING --> WAITING_FOR_APPROVAL: gate node reached
+    RUNNING --> WAITING_FOR_INPUT: clarification needed
+    WAITING_FOR_APPROVAL --> RUNNING: approve() / reject()
+    WAITING_FOR_INPUT --> RUNNING: clarify()
+    RUNNING --> SUCCEEDED: export completes
+    RUNNING --> FAILED: repair budget exhausted, or approval rejected
+    RUNNING --> STOPPED: stop()
+    PENDING --> STOPPED: stop()
+    WAITING_FOR_APPROVAL --> STOPPED: stop()
+    WAITING_FOR_INPUT --> STOPPED: stop()
+    SUCCEEDED --> [*]
+    FAILED --> [*]
+    STOPPED --> [*]
+```
+
+### Failure recovery and replanning decision flow
+
+Two independent decision paths: bounded repair on a failed node (left), and invalidation cascade on a
+mid-flight requirement revision (right, `Coordinator._revise`).
+
+```mermaid
+flowchart TD
+    A[implement / validate node fails] --> B{repair cycles<br/>used < 2?}
+    B -- yes --> C[repair_started:<br/>re-invoke implementer with<br/>failing output as context]
+    C --> D{validate passes<br/>on the new candidate?}
+    D -- yes --> E[continue pipeline]
+    D -- no --> B
+    B -- no, budget exhausted --> F[rollback to last<br/>verified snapshot]
+    F --> G[run FAILED<br/>pre/post hash + failure evidence preserved]
+
+    H[requirement revision submitted] --> I[new immutable<br/>requirement_revisions row]
+    I --> J["affected_by_inputs({'requirement'})<br/>+ transitive dependents"]
+    J --> K[RUNNING affected nodes → CANCELLED]
+    J --> L[completed/failed affected attempts<br/>→ INVALIDATED, even prior SUCCEEDED]
+    J --> M[pending/approved approvals<br/>→ invalidated with reason]
+    K --> N[resume: invalidated nodes<br/>are re-dispatched]
+    L --> N
+    M --> N
+    N --> O[new graph revision published,<br/>diffed against prior<br/>fresh plan_approval required]
+```
 
 ## Prerequisites
 
