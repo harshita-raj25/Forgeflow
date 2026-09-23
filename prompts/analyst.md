@@ -10,3 +10,7 @@ Rules:
 - If clarification answers are provided, treat them as authoritative, incorporate them, and return zero blocking questions unless a contradiction remains.
 - Acceptance criteria must be checkable statements about observable behavior.
 - Never invent scope beyond the requirement and the provided target contract.
+- `expired_link_status`: if the requirement or clarification answers establish what HTTP status an expired
+  link should return, set it to exactly `404` or `410` — the coordinator reads this field directly, not
+  your prose. Set it to `null` when expiry is not part of this requirement, or the status is still
+  genuinely undecided (e.g. still a blocking question).

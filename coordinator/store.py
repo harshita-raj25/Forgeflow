@@ -177,6 +177,23 @@ class Store:
             self.update_run(run_id, status=status)
             self.append_event(run_id, "run_status", {"from": old, "to": status, **payload}, actor=actor)
 
+    def set_status_if(self, run_id: str, expected: str, status: str, actor: str = "coordinator", **payload) -> bool:
+        """Compare-and-set: only transitions if the run's *current* status is still `expected`, checked and
+        written inside the same transaction. Returns whether it transitioned. Used wherever a caller read
+        the run's status earlier and wants to act on it later (e.g. after a slow model call or another
+        lock's critical section) without silently resurrecting a run that a concurrent stop() already moved
+        to STOPPED in between (fifth review round, finding: stale-status-then-write could undo Safe Stop)."""
+        assert status in RUN_STATUSES, status
+        with self.conn():
+            old = self.get_run(run_id)["status"]
+            if old != expected:
+                return False
+            if old == status:
+                return True
+            self.update_run(run_id, status=status)
+            self.append_event(run_id, "run_status", {"from": old, "to": status, **payload}, actor=actor)
+            return True
+
     def add_provider_call(self, run_id: str) -> int:
         with self.conn() as c:
             c.execute("UPDATE runs SET provider_calls=provider_calls+1, updated_at=? WHERE id=?", (iso(), run_id))

@@ -6,8 +6,8 @@
 .venv/bin/python -m pytest -q tests
 ```
 
-Result (current, after both code-review fix passes): **78 passed** (0 skipped, 0 failed), ~28s including
-real Docker container invocations. Per-file counts via `pytest --collect-only`:
+Result (current, after five review rounds): **94 passed** (0 skipped, 0 failed), ~40s including real
+Docker container invocations. Per-file counts via `pytest --collect-only`:
 
 Breakdown:
 - `tests/test_graph.py` — 10 tests: topological order, cycle/unknown-dependency/duplicate-id/missing-gate
@@ -40,10 +40,20 @@ Breakdown:
   ownership checks, validation-artifact hash integrity, CSRF/Origin rejection of an untrusted Host
   (including a DNS-rebinding-style self-consistent attacker Host+Origin pair), bounded worker-output
   collection, and exact-path-vs-sibling-file authorization.
-- `tests/test_review_fixes_2.py` — 7 tests (second code-review pass): zero-passed-assertion result
+- `tests/test_review_fixes_2.py` — 9 tests (second code-review pass): zero-passed-assertion result
   rejection (`no tests ran`, all-skipped), lease survival across an in-flight dispatch via a dedicated
   heartbeat thread, real cross-process mutual exclusion between two separate `Coordinator` instances, and
   Stop correctly blocking an in-flight implement write from landing.
+- `tests/test_review_fixes_3.py` — 6 tests (third code-review pass): the hardcoded per-stage minimum
+  passed-test count, a suspiciously-low-but-nonzero passed count rejected for stage A, a stale lease
+  holder blocked from publishing after a real takeover by a genuinely separate OS process, and the
+  current lease holder still able to promote normally.
+- `tests/test_review_fixes_4.py` — 8 tests (fifth, independent-session review): a migration-symlink
+  host-write refused with real Docker, a Safe Stop that a concurrent approval/revision/clarification
+  call can no longer silently undo (all three call sites, plus a direct compare-and-set unit test), and
+  the expired-link status oracle reading a structured field instead of being flippable by requirement
+  prose (including the reviewer's own negation-trap sentences, and an end-to-end run through real
+  clarification and revision).
 
 ## Trusted product tests (run inside the isolated Docker worker per candidate)
 

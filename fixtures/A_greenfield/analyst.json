@@ -41,5 +41,6 @@
     "new-service",
     "public-api"
   ],
-  "notes": "Greenfield; target contract fully specifies behavior, no clarification needed."
+  "notes": "Greenfield; target contract fully specifies behavior, no clarification needed.",
+  "expired_link_status": null
 }

@@ -15,7 +15,8 @@ is the accurate, current-state summary.
 ## Architecture at a glance
 
 Full breakdown (components, state model, policy engine, adapters, isolated runner): see
-[`docs/architecture.md`](docs/architecture.md).
+[`docs/architecture.md`](docs/architecture.md) — including
+[why this is a standalone coordinator and not a skill on top of Claude Code/Codex/Cursor](docs/architecture.md#why-a-standalone-coordinator-not-a-skill-on-top-of-claude-code--codex--cursor).
 
 ### Orchestration graph
 
@@ -196,7 +197,7 @@ live provider call stops the run for human intervention (`AdapterError`), it is 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q tests   # coordinator unit + orchestration tests (needs Docker); 86 tests across four fix passes responding to four external review rounds
+.venv/bin/python -m pytest -q tests   # coordinator unit + orchestration tests (needs Docker); 94 tests across five fix passes responding to five external review rounds
 ```
 
 In normal operation the trusted tests run **inside the worker container** against each candidate

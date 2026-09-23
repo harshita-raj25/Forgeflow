@@ -150,6 +150,22 @@ def resolve_inside(workspace: Path, norm: str) -> Path:
     return final
 
 
+def write_text_no_symlink(path: Path, content: str) -> None:
+    """Write text to a host path that a container may have had read-write access to (e.g. the demo dir
+    bind-mounted for migration), refusing to follow an existing symlink. A container's own process can
+    plant a symlink inside a bind-mounted directory pointing anywhere on the host filesystem -- the mount
+    boundary does not constrain what a symlink *target string* can say, only what the container's own
+    processes can directly read/write. `O_NOFOLLOW` makes the refusal atomic at the kernel level (no
+    check-then-open race): if the path is a symlink, this raises before anything is written, rather than
+    silently writing through it to whatever it points at (fifth review round finding)."""
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+    except OSError as e:
+        raise PolicyViolation("symlink", f"refusing to write {path}: {e}") from e
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+
+
 def fixed_command(name: str) -> list[str]:
     if name not in FIXED_COMMANDS:
         raise PolicyViolation("command_not_allowed", f"only fixed commands {sorted(FIXED_COMMANDS)} may run; got {name!r}")

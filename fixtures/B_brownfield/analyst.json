@@ -33,5 +33,6 @@
     "breaking-change-risk",
     "public-api"
   ],
-  "notes": "Brownfield; contract for aliases is fully specified, no clarification needed."
+  "notes": "Brownfield; contract for aliases is fully specified, no clarification needed.",
+  "expired_link_status": null
 }

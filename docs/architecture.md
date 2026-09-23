@@ -20,6 +20,49 @@ workspace) are strictly separate. Generated code can only write under `app/` and
 disposable workspace; it can never see or edit `coordinator/`, `trusted_tests/`, `prompts/`, `schemas/`, or
 another run's files. See `coordinator/policy.py`.
 
+## Why a standalone coordinator, not a skill on top of Claude Code / Codex / Cursor
+
+The obvious shortcut would have been a slash-command or custom-instructions skill layered on an existing
+coding agent. That was rejected, for reasons specific to what this assignment actually asks for, not
+because reuse is bad in general:
+
+- **A skill inherits its host agent's full permission surface; it doesn't get its own boundary.** Claude
+  Code, Codex, and Cursor skills are system-prompt-level behavior, running inside an agent that already has
+  broad shell and filesystem access on the real machine. This system's whole thesis is the opposite: the
+  model only ever *proposes* (`coordinator/roles.py`'s system preamble says so explicitly), and a separate
+  policy engine (`coordinator/policy.py`) is the only thing that can turn a proposal into a filesystem
+  write, a command, or an approval. That separation has to be enforced by code the model cannot talk its
+  way around — it cannot be a prompt convention layered on an agent that could already do all of it itself.
+- **Gates, leases, and hash-chained events need durable state outside any one chat session.** A skill lives
+  inside whatever conversation invoked it. This system needs to survive a process restart mid-run, resolve
+  which scheduler currently owns a run under a real cross-process lock, and replan by invalidating exactly
+  the downstream nodes a changed requirement affects — none of that is expressible as a session-scoped
+  skill; it needs its own state machine (`coordinator/store.py`, SQLite) independent of any interactive
+  session.
+- **The isolation boundary has to be enforced independently of the agent's own tool-calling.** Wrapping
+  Claude Code/Codex/Cursor's own file/shell tools as the execution path means trusting that agent's
+  permission model for something this system needs to guarantee itself: no network, non-root, read-only
+  mount, no credentials, verified from *inside* the container at runtime
+  (`trusted_tests/tools/check_isolation.py`). Building that boundary underneath a skill wrapper would mean
+  building this exact runner anyway, with an extra layer of indirection and the host agent's own broader
+  permissions as additional attack surface.
+- **The assignment specifically asks for orchestration primitives — an explicit dependency graph, entry/
+  exit gates, parallel paths with synchronization, bounded retry/rollback, dynamic replanning — that a host
+  agent's own loop doesn't expose for a skill to attach to.** Claude Code's, Codex's, and Cursor's internal
+  agent loops are not something a skill can bolt a coordinator-owned approval gate or a lease-based
+  scheduler onto; to meet those requirements at all, the orchestration primitives have to be owned by this
+  system, not borrowed from a host tool's opaque loop.
+- **Portability.** A skill is bound to one vendor's extension format and one host tool's session lifecycle.
+  A standalone coordinator can swap model providers (`OpenAIAdapter` live vs. `FixtureAdapter` deterministic
+  today; `coordinator/adapters/`) without being rewritten per host agent, and the same governance engine
+  (policy, gates, evidence export) is something that could actually run as a service — not only inside a
+  single person's interactive coding session.
+
+None of this is a claim that skills are the wrong tool in general — for a task genuinely scoped to "make my
+existing coding session do X," a skill is the right, cheap answer. It was the wrong fit *here* because the
+deliverable is the governance and orchestration layer itself, and that layer has to hold guarantees no host
+agent's skill system currently lets you enforce from the outside.
+
 ## Orchestration graph
 
 Gates (diamonds) are inserted by the coordinator (`coordinator/graph.py::build_standard_graph`), not

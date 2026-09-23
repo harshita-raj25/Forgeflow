@@ -88,6 +88,7 @@ SCHEMAS: dict[str, dict] = {
             "non_blocking_questions": _strs,
             "risk_tags": _strs,
             "notes": _str,
+            "expired_link_status": {"type": ["integer", "null"], "enum": [404, 410, None]},
         }
     ),
     "architect": _obj(

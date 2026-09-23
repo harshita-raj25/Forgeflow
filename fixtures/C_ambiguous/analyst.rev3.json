@@ -31,5 +31,6 @@
   "risk_tags": [
     "data-migration"
   ],
-  "notes": "Requirement revised: expired-link response changed from 404 to 410 Gone."
+  "notes": "Requirement revised: expired-link response changed from 404 to 410 Gone.",
+  "expired_link_status": 410
 }

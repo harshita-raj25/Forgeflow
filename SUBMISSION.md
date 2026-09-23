@@ -40,7 +40,7 @@ under `runs/<run-id>/export/`.
 
 ## Testing approach, limitations, and trade-offs
 
-- Testing: [`docs/testing-report.md`](docs/testing-report.md) — 86 coordinator tests, trusted-suite results
+- Testing: [`docs/testing-report.md`](docs/testing-report.md) — 94 coordinator tests, trusted-suite results
   per stage, live-service HTTP smoke tests.
 - Limitations and trade-offs: [`docs/limitations.md`](docs/limitations.md) — **read the "Two unresolved
   architectural gaps" section first**; it states plainly what is not closed, ahead of the routine
@@ -56,7 +56,8 @@ submission.
 
 ## Review history (for context, not required reading)
 
-Four rounds of external adversarial code review shaped this prototype. The pattern across rounds — each fix
+Five rounds of external adversarial code review shaped this prototype (the fifth run independently, in a
+fresh session with no access to the prior four). The pattern across rounds — each fix
 closing the specific reproduced case without closing the underlying design problem for the two hardest
 findings — is what `docs/limitations.md`'s top section and `docs/final-engineering-summary.md` state
 directly.

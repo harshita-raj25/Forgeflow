@@ -29,5 +29,6 @@
     "ambiguous-requirement",
     "breaking-change-risk"
   ],
-  "notes": "Requirement text does not define expiry semantics or the expired response code; pausing for clarification before any design."
+  "notes": "Requirement text does not define expiry semantics or the expired response code; pausing for clarification before any design.",
+  "expired_link_status": null
 }

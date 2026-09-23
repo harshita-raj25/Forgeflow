@@ -49,6 +49,7 @@ write(
         "non_blocking_questions": [],
         "risk_tags": ["new-service", "public-api"],
         "notes": "Greenfield; target contract fully specifies behavior, no clarification needed.",
+        "expired_link_status": None,
     },
 )
 write(
@@ -112,6 +113,7 @@ write(
         "non_blocking_questions": [],
         "risk_tags": ["breaking-change-risk", "public-api"],
         "notes": "Brownfield; contract for aliases is fully specified, no clarification needed.",
+        "expired_link_status": None,
     },
 )
 write(
@@ -177,6 +179,7 @@ write(
         "non_blocking_questions": [],
         "risk_tags": ["ambiguous-requirement", "breaking-change-risk"],
         "notes": "Requirement text does not define expiry semantics or the expired response code; pausing for clarification before any design.",
+        "expired_link_status": None,
     },
 )
 write(
@@ -195,6 +198,7 @@ write(
         "non_blocking_questions": [],
         "risk_tags": ["data-migration"],
         "notes": "Human clarification received; initial contract targets 404 for expired links.",
+        "expired_link_status": 404,
     },
 )
 write(
@@ -213,6 +217,7 @@ write(
         "non_blocking_questions": [],
         "risk_tags": ["data-migration"],
         "notes": "Requirement revised: expired-link response changed from 404 to 410 Gone.",
+        "expired_link_status": 410,
     },
 )
 for rev, status in ((2, 404), (3, 410)):

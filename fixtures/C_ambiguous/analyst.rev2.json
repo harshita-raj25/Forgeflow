@@ -31,5 +31,6 @@
   "risk_tags": [
     "data-migration"
   ],
-  "notes": "Human clarification received; initial contract targets 404 for expired links."
+  "notes": "Human clarification received; initial contract targets 404 for expired links.",
+  "expired_link_status": 404
 }

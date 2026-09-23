@@ -67,6 +67,17 @@
     },
     "notes": {
       "type": "string"
+    },
+    "expired_link_status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "enum": [
+        404,
+        410,
+        null
+      ]
     }
   },
   "required": [
@@ -76,6 +87,7 @@
     "blocking_questions",
     "non_blocking_questions",
     "risk_tags",
-    "notes"
+    "notes",
+    "expired_link_status"
   ]
 }

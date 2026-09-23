@@ -20,7 +20,7 @@ from pathlib import Path
 from .adapters.base import AdapterError, BudgetExhausted, InvalidModelOutput, ModelAdapter, ModelRequest, ModelResponse
 from .config import Settings
 from .graph import GraphValidationError, TaskGraph, TaskNode, build_standard_graph, diff_graphs
-from .policy import PolicyViolation, scan_untrusted_text, validate_edits
+from .policy import PolicyViolation, scan_untrusted_text, validate_edits, write_text_no_symlink
 from .roles import files_block, load_schema, system_prompt, untrusted
 from .runner import DockerRunner, RunnerUnavailable, RunResult
 from .scenarios import Scenario, load_scenario
@@ -341,7 +341,13 @@ class Coordinator:
         rev = self._revise(
             run_id, req["text"], f"clarification {clarification_id} answered", clar, actor=f"human:{self.settings.human_label}"
         )
-        self.store.set_status(run_id, "PENDING", actor="human", reason="clarification answered")
+        # Re-check status under the same cross-process lock stop() holds around its STOPPED write, rather
+        # than acting on the status read at function entry: otherwise a stop() landing after that read but
+        # before this write silently gets undone back to PENDING (fifth review round finding).
+        with self._promote_lock(run_id):
+            fresh = self.store.get_run(run_id)["status"]
+            if fresh not in TERMINAL_RUN:
+                self.store.set_status_if(run_id, fresh, "PENDING", actor="human", reason="clarification answered")
         return rev
 
     def revise_requirement(self, run_id: str, text: str, reason: str) -> int:
@@ -350,8 +356,12 @@ class Coordinator:
             raise ValueError(f"run is {run['status']}; cannot revise")
         req = self.store.get_requirement(run_id)
         rev = self._revise(run_id, text, reason, req["clarifications"], actor=f"human:{self.settings.human_label}")
-        if run["status"] in ("WAITING_FOR_APPROVAL", "WAITING_FOR_INPUT", "RUNNING"):
-            self.store.set_status(run_id, "PENDING", actor="human", reason="requirement revised; replanning")
+        # Same fix as answer_clarification: re-check status under _promote_lock immediately before writing,
+        # not the stale `run` read from function entry, so a concurrent stop() can't be undone.
+        with self._promote_lock(run_id):
+            fresh = self.store.get_run(run_id)["status"]
+            if fresh in ("WAITING_FOR_APPROVAL", "WAITING_FOR_INPUT", "RUNNING"):
+                self.store.set_status_if(run_id, fresh, "PENDING", actor="human", reason="requirement revised; replanning")
         return rev
 
     def _revise(self, run_id: str, text: str, reason: str, clarifications: list, actor: str) -> int:
@@ -400,8 +410,12 @@ class Coordinator:
         if a["graph_revision"] != run["graph_revision"] or a["requirement_revision"] != run["requirement_revision"]:
             raise ValueError("approval refers to a stale revision; it cannot be decided")
         d = self.store.decide_approval(approval_id, approve, self.settings.human_label, rationale)
-        if run["status"] == "WAITING_FOR_APPROVAL":
-            self.store.set_status(run_id, "PENDING", actor=f"human:{self.settings.human_label}", reason=f"approval {d['status']}")
+        # Same fix as answer_clarification/revise_requirement: CAS under _promote_lock instead of acting on
+        # the stale `run` status read above, so a concurrent stop() can't be silently undone.
+        with self._promote_lock(run_id):
+            self.store.set_status_if(
+                run_id, "WAITING_FOR_APPROVAL", "PENDING", actor=f"human:{self.settings.human_label}", reason=f"approval {d['status']}"
+            )
         return d
 
     # ------------------------------------------------------------- execution
@@ -986,14 +1000,18 @@ class Coordinator:
         )
 
     def _expected_expired_status(self, run_id: str) -> int:
-        """The redirect status trusted tests must expect for expired links, read from the current
-        (coordinator-authoritative) normalized requirement rather than trusted by model wording alone.
-        Defaults to 410 (the contract's default) when the requirement does not mention expiry at all."""
+        """The redirect status trusted tests must expect for expired links.
+
+        Reads the analyst's structured `expired_link_status` field directly (schemas/analyst.json), not a
+        text search over the normalized requirement: a prior version scanned for "404"/"410" substrings in
+        prose, which a sentence like "410 Gone (not 404)" or "unknown codes still return 404" (a true
+        statement about a *different* case) could silently flip. The model is instructed to set this field
+        from the actual clarification answer or requirement text (prompts/analyst.md), and the coordinator
+        trusts the field, not the surrounding wording. Defaults to 410 (the contract's default) only when
+        the field is null/absent, e.g. before a scenario resolves the question."""
         reqs = self._latest_artifact_json(run_id, "requirements")
-        text = " ".join([reqs.get("normalized_requirement", "")] + [c.get("statement", "") for c in reqs.get("acceptance_criteria", [])])
-        if "404" in text and "410" not in text:
-            return 404
-        return 410
+        status = reqs.get("expired_link_status")
+        return status if status in (404, 410) else 410
 
     def _node_validate(self, run_id: str, node: TaskNode, aid: str, run: dict, req: dict) -> dict:
         if self.runner is None:
@@ -1213,7 +1231,13 @@ class Coordinator:
         r = self.runner.run_migration(
             ws.candidate_dir, demo, on_start=lambda cname, pid: self.store.set_attempt_worker(aid, pid=pid, container_id=cname)
         )
-        (demo / "migration-result.json").write_text(json.dumps(r.as_dict(), indent=2))
+        # The container had rw access to `demo` to run the migration; refuse to follow a symlink a
+        # candidate may have planted there instead of silently writing our own output through it onto an
+        # arbitrary host path (fifth review round finding -- this write previously used plain write_text).
+        try:
+            write_text_no_symlink(demo / "migration-result.json", json.dumps(r.as_dict(), indent=2))
+        except PolicyViolation as e:
+            raise NodeFailure("policy", f"migration output path unsafe: {e}", repairable=False) from e
         try:
             summary = json.loads(r.stdout.strip().splitlines()[-1]) if r.stdout.strip() else {}
         except json.JSONDecodeError:
