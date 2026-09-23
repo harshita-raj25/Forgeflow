@@ -169,9 +169,19 @@ class Store:
             c.execute(f"UPDATE runs SET {cols} WHERE id=?", (*fields.values(), run_id))
 
     def set_status(self, run_id: str, status: str, actor: str = "coordinator", **payload) -> None:
+        """A terminal run (SUCCEEDED/FAILED/STOPPED) never leaves that state through this method, no matter
+        who calls it or why. The fifth review round fixed three human-triggered call sites that could
+        resurrect a just-STOPPED run via a stale-status-then-write race; a sixth review found the guard was
+        too narrow -- the scheduler's own internal set_status calls (the approval gate, a blocking
+        clarification, a repair cycle re-entering RUNNING) had the identical unconditional-write shape and
+        could resurrect STOPPED too, since Stop can land in the same narrow window relative to any of them.
+        Enforcing "terminal is terminal" once, here, closes it for every caller -- present and future --
+        instead of auditing and patching each call site individually."""
         assert status in RUN_STATUSES, status
         with self.conn():
             old = self.get_run(run_id)["status"]
+            if old in TERMINAL_RUN:
+                return
             if old == status:
                 return
             self.update_run(run_id, status=status)
@@ -182,10 +192,14 @@ class Store:
         written inside the same transaction. Returns whether it transitioned. Used wherever a caller read
         the run's status earlier and wants to act on it later (e.g. after a slow model call or another
         lock's critical section) without silently resurrecting a run that a concurrent stop() already moved
-        to STOPPED in between (fifth review round, finding: stale-status-then-write could undo Safe Stop)."""
+        to STOPPED in between (fifth review round, finding: stale-status-then-write could undo Safe Stop).
+        Also refuses out of a terminal state even if `expected` somehow matched it, for the same reason as
+        `set_status` above (sixth review round)."""
         assert status in RUN_STATUSES, status
         with self.conn():
             old = self.get_run(run_id)["status"]
+            if old in TERMINAL_RUN:
+                return False
             if old != expected:
                 return False
             if old == status:

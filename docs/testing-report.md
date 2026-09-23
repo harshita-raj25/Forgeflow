@@ -6,7 +6,7 @@
 .venv/bin/python -m pytest -q tests
 ```
 
-Result (current, after five review rounds): **94 passed** (0 skipped, 0 failed), ~40s including real
+Result (current, after six review rounds): **96 passed** (0 skipped, 0 failed), ~40s including real
 Docker container invocations. Per-file counts via `pytest --collect-only`:
 
 Breakdown:
@@ -54,6 +54,10 @@ Breakdown:
   the expired-link status oracle reading a structured field instead of being flippable by requirement
   prose (including the reviewer's own negation-trap sentences, and an end-to-end run through real
   clarification and revision).
+- `tests/test_review_fixes_5.py` — 2 tests (sixth, independent-session review): `Store.set_status`/
+  `set_status_if` proven to never leave a terminal state regardless of caller, and the exact reproduction
+  the reviewer gave (Stop landing as the scheduler reaches the plan-approval gate) confirmed to stay
+  STOPPED with nothing dispatching afterward.
 
 ## Trusted product tests (run inside the isolated Docker worker per candidate)
 

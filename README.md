@@ -197,7 +197,7 @@ live provider call stops the run for human intervention (`AdapterError`), it is 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q tests   # coordinator unit + orchestration tests (needs Docker); 94 tests across five fix passes responding to five external review rounds
+.venv/bin/python -m pytest -q tests   # coordinator unit + orchestration tests (needs Docker); 96 tests across six fix passes responding to six external review rounds
 ```
 
 In normal operation the trusted tests run **inside the worker container** against each candidate

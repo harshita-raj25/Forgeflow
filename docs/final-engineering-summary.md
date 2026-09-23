@@ -1,8 +1,8 @@
 # Final engineering summary
 
-Written 23 September 2026, updated after a fifth round of external adversarial code review (run
-independently, in a fresh session with no access to the first four). This is the accurate, current state
-of the prototype — not a snapshot from an earlier round.
+Written 23 September 2026, updated after a fifth and sixth round of external adversarial code review (both
+run independently, each in a fresh session with no access to the others). This is the accurate, current
+state of the prototype — not a snapshot from an earlier round.
 
 ## What was asked
 
@@ -31,7 +31,7 @@ final engineering summary covering plan, artifacts, risks, assumptions, and limi
   contract stages — core, custom aliases, optional expiry. This is what the runtime agents actually
   produce, not something hand-built and narrated as agent output.
 - **Minimal UI + full-parity CLI**, trusted acceptance tests mounted read-only into the worker, and the
-  coordinator's own test suite: **94 tests**, all passing, run inside the real Docker isolation boundary
+  coordinator's own test suite: **96 tests**, all passing, run inside the real Docker isolation boundary
   where relevant.
 
 ## Governance controls implemented and tested
@@ -74,7 +74,7 @@ threshold, or check would only produce another round finding a narrower window s
 is that this system demonstrates the required governance controls and is not adversarially hardened
 against a determined attacker in either of these two specific ways.
 
-## Fifth review round (independent session)
+## Fifth and sixth review rounds (independent sessions)
 
 A fifth review, run independently with no access to the first four, found 8 further issues by reading the
 source and reproducing each one. Three were fixed (a host-side symlink-following write during the stage-C
@@ -82,9 +82,19 @@ migration; a Safe Stop that a concurrent approval/revision/clarification call co
 expired-link status oracle that trusted prose instead of a structured field) and independently
 checker-verified. The other five were judged real but narrower in blast radius and are disclosed, not
 fixed, for the same reason feature work was frozen after round four: chasing every adversarial finding to
-closure has diminishing returns against a submission deadline. Full detail, including exactly which of the
-two architectural gaps above this round does and does not touch (none of the eight are the same class of
-issue as either gap), is in `docs/limitations.md`'s "Fifth review round" section.
+closure has diminishing returns against a submission deadline.
+
+A sixth review, independent of the fifth, checked that commit's three fixes by reproducing each from
+scratch (real Docker, real concurrent threads, real jsonschema validation) and confirmed all three hold —
+then found the Safe Stop fix itself was too narrow: it guarded the three human-triggered call sites but not
+the scheduler's own internal status writes (the approval gate, a blocking clarification, a repair cycle),
+which had the same unconditional-write shape and could resurrect a just-stopped run the same way. Fixed at
+the root in `Store.set_status`/`set_status_if` instead of auditing each call site, so no future caller can
+reopen the same class of gap either.
+
+Full detail, including exactly which of the two architectural gaps above these rounds does and does not
+touch (none of the findings from either round are the same class of issue as either gap), is in
+`docs/limitations.md`'s "Fifth review round" section.
 
 ## Live model evidence
 
@@ -111,7 +121,7 @@ sharing one adapter process; POSIX (`fcntl`) for the cross-process lock, no Wind
 
 ## Validation performed
 
-- 94 coordinator unit/integration tests, all passing, across five fix passes responding to five review
+- 96 coordinator unit/integration tests, all passing, across six fix passes responding to six review
   rounds (`docs/testing-report.md`).
 - All three trusted test stages passing against hand-written reference implementations inside the real
   Docker isolation boundary.

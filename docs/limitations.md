@@ -64,6 +64,17 @@ scenarios; all three are fixed, independently checker-verified, and covered by `
    status still correctly ends STOPPED and nothing executes off that decision), but it is a real, disclosed
    gap in when exactly the decision record and the run's terminal status agree, not a claim of full
    atomicity across the entire `decide_approval` call.
+
+   **A sixth, independent review found the fix above was too narrow.** It covered the three human-triggered
+   call sites, but the scheduler's own internal `set_status` calls (the approval gate requesting a fresh
+   approval, a blocking clarification pausing the run, a repair cycle re-entering `RUNNING`) had the
+   identical unconditional-write shape and could resurrect a just-`STOPPED` run in the same narrow window —
+   reproduced with Stop landing exactly as the scheduler reaches the plan-approval gate, resulting in
+   `STOPPED → WAITING_FOR_APPROVAL` and every downstream node dispatching once a human approved anyway.
+   Fixed at the root instead of auditing every call site: `Store.set_status` and `Store.set_status_if`
+   (`coordinator/store.py`) now refuse to leave a terminal state (`SUCCEEDED`/`FAILED`/`STOPPED`) for *any*
+   caller, present or future — not just the three already-known ones. Covered by
+   `tests/test_review_fixes_5.py`.
 3. **The expired-link status oracle trusted prose, not intent.** `_expected_expired_status` searched the
    analyst's freeform normalized-requirement text for the substrings "404"/"410" — a sentence like
    "410 Gone (not 404)" or a true statement about a *different* case ("unknown codes still return 404")
