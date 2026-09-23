@@ -6,7 +6,7 @@ searching.
 
 **Five-minute version:** [the ForgeFlow Dossier](https://claude.ai/artifact/5W5bnrH8UNmvo2XrJTZVgd) —
 one page, the assignment's own 8 core requirements checked off against real evidence, the orchestration
-graph, all three scenarios, the four-round adversarial hardening timeline, and both open limitations
+graph, all three scenarios, the six-round adversarial hardening timeline, and both open limitations
 stated as plainly as everything else. Start there; everything below is the full paper trail behind it.
 
 ## Working prototype (runnable end-to-end)
